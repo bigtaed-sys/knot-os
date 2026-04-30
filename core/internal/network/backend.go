@@ -27,9 +27,33 @@ type Backend interface {
 	// system (or the simulated state, for the mock).
 	Status(ctx context.Context) (Status, error)
 
+	// Scan returns nearby Wi-Fi networks visible to wlan0. Used by the
+	// first-run wizard to populate the uplink selector.
+	//
+	// On Linux this requires temporarily disabling ap0 because the
+	// BCM43436 cannot scan and broadcast on different channels. The
+	// implementation is expected to handle that transparently.
+	Scan(ctx context.Context) ([]ScannedNetwork, error)
+
 	// Name identifies the implementation for logging and the /api/status
 	// endpoint ("mock", "linux", ...).
 	Name() string
+}
+
+// ScannedNetwork is a single Wi-Fi network discovered by Scan.
+type ScannedNetwork struct {
+	SSID string `json:"ssid"`
+	// BSSID is the AP's MAC address — used to disambiguate networks
+	// with the same SSID (e.g. mesh systems).
+	BSSID string `json:"bssid,omitempty"`
+	// Channel is the 2.4/5 GHz channel number.
+	Channel int `json:"channel"`
+	// Band is "2.4" or "5".
+	Band string `json:"band"`
+	// RSSIdBm is the signal strength (negative; closer to 0 = stronger).
+	RSSIdBm int `json:"rssi_dbm"`
+	// Secured reports whether the network requires a passphrase.
+	Secured bool `json:"secured"`
 }
 
 // Status is the runtime view of the network. The fields are deliberately

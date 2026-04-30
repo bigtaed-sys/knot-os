@@ -85,6 +85,10 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/auth/me", s.handleMe)
 	})
 
+	// Setup endpoints — gated by role inside the handler, no auth
+	// required. Available only while role == "setup".
+	s.MountSetup(r)
+
 	return r
 }
 

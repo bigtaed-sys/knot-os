@@ -72,3 +72,14 @@ func (m *MockBackend) Last() (config.Config, bool) {
 	defer m.mu.Unlock()
 	return m.last, m.hasState
 }
+
+// Scan implements Backend by returning a deterministic set of fake
+// networks. Useful for exercising the wizard UI without real radios.
+func (m *MockBackend) Scan(_ context.Context) ([]ScannedNetwork, error) {
+	return []ScannedNetwork{
+		{SSID: "HomeWiFi", BSSID: "aa:bb:cc:dd:ee:01", Channel: 6, Band: "2.4", RSSIdBm: -45, Secured: true},
+		{SSID: "Neighbor", BSSID: "aa:bb:cc:dd:ee:02", Channel: 11, Band: "2.4", RSSIdBm: -68, Secured: true},
+		{SSID: "FreeCafe", BSSID: "aa:bb:cc:dd:ee:03", Channel: 1, Band: "2.4", RSSIdBm: -78, Secured: false},
+		{SSID: "HomeWiFi-5G", BSSID: "aa:bb:cc:dd:ee:04", Channel: 36, Band: "5", RSSIdBm: -55, Secured: true},
+	}, nil
+}

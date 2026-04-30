@@ -61,9 +61,14 @@ type Network struct {
 // WiFiUplink is the configuration of the upstream Wi-Fi connection.
 type WiFiUplink struct {
 	SSID string `yaml:"ssid" json:"ssid"`
-	// PSKEncrypted is the WPA2 passphrase, encrypted at rest with the
-	// device key. Plaintext is never persisted. Empty for open networks.
-	PSKEncrypted string `yaml:"psk_encrypted,omitempty" json:"psk_encrypted,omitempty"`
+	// PSK is the WPA2 passphrase. Empty for open networks.
+	//
+	// v0.1 stores this as plaintext in /etc/knot/config.yaml; the file
+	// is owned by root with 0600 permissions. A future change will
+	// encrypt PSKs at rest with a per-device key derived at first
+	// boot — when that lands, the YAML field will be renamed to
+	// `psk_encrypted` and a migration runs once.
+	PSK string `yaml:"psk,omitempty" json:"psk,omitempty"`
 }
 
 // WiFiAP is the configuration of the broadcasted Wi-Fi network.
@@ -73,7 +78,7 @@ type WiFiUplink struct {
 // channel as the uplink. The UI surfaces this constraint to the user.
 type WiFiAP struct {
 	SSID         string `yaml:"ssid"                    json:"ssid"`
-	PSKEncrypted string `yaml:"psk_encrypted,omitempty" json:"psk_encrypted,omitempty"`
+	PSK string `yaml:"psk,omitempty" json:"psk,omitempty"`
 	// Band is "2.4" or "5". On Zero 2W only 2.4 is supported reliably for ap0.
 	Band string `yaml:"band" json:"band"`
 }
