@@ -39,10 +39,27 @@ try {
 
 # ---- 2. Pick a distro ------------------------------------------------------
 
-# wsl.exe --list outputs UTF-16 LE on Windows; capture and decode.
-$rawList = (& wsl.exe --list --quiet)
+# wsl.exe --list outputs UTF-16 LE. On a non-Unicode Windows console
+# (cp1251 etc.) PowerShell decodes those bytes as ANSI, which leaves
+# embedded NUL bytes inside what looks like an ASCII distro name -
+# "Ubuntu" then fails to match ^Ubuntu and gets misclassified.
+#
+# Fix: set the console output encoding to Unicode for the duration of
+# the wsl call, then scrub any remaining stray control / format chars
+# (NUL, BOM, RTL marks) from each line.
+function Invoke-WslListQuiet {
+    $prevEnc = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+    try {
+        return (& wsl.exe --list --quiet)
+    } finally {
+        [Console]::OutputEncoding = $prevEnc
+    }
+}
+
+$rawList = Invoke-WslListQuiet
 $distros = $rawList |
-    ForEach-Object { $_.Trim() } |
+    ForEach-Object { ($_ -replace '\p{C}', '').Trim() } |
     Where-Object { $_ -ne '' -and $_ -notmatch '^docker-desktop' }
 
 if ($distros.Count -eq 0) {
