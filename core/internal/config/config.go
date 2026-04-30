@@ -18,13 +18,23 @@ const (
 	RoleWiFiExtender Role = "wifi-extender"
 )
 
-// Config is the root configuration document, persisted as YAML and
-// version-controlled in /etc/knot/config.git.
+// Config is the root configuration document, persisted as YAML at
+// /etc/knot/config.yaml.
 type Config struct {
 	Device  Device                  `yaml:"device"            json:"device"`
 	Role    Role                    `yaml:"role"              json:"role"`
+	Auth    Auth                    `yaml:"auth"              json:"auth"`
 	Network Network                 `yaml:"network"           json:"network"`
 	Plugins map[string]PluginConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
+}
+
+// Auth holds credentials for the local admin account.
+//
+// PasswordHash is the bcrypt hash of the admin password. It is stored
+// in YAML (never the plaintext) and exposed over the API only as a
+// boolean "configured" flag — never the hash itself.
+type Auth struct {
+	PasswordHash string `yaml:"password_hash,omitempty" json:"-"`
 }
 
 // Device holds top-level identity and locale settings.

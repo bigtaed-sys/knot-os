@@ -65,9 +65,19 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 			wantSub: "role",
 		},
 		{
+			name: "extender without auth hash",
+			mutate: func(c *Config) {
+				c.Role = RoleWiFiExtender
+				c.Network.Uplink = &WiFiUplink{SSID: "u"}
+				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4"}
+			},
+			wantSub: "auth.password_hash",
+		},
+		{
 			name: "extender without uplink",
 			mutate: func(c *Config) {
 				c.Role = RoleWiFiExtender
+				c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
 				c.Network.AP = &WiFiAP{SSID: "x", Band: "2.4"}
 			},
 			wantSub: "uplink.ssid",
@@ -76,6 +86,7 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 			name: "extender bad CIDR",
 			mutate: func(c *Config) {
 				c.Role = RoleWiFiExtender
+				c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
 				c.Network.Uplink = &WiFiUplink{SSID: "u"}
 				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4"}
 				c.Network.LAN = &LAN{CIDR: "not-a-cidr", DHCP: DHCP{PoolStart: "1.1.1.1", PoolEnd: "1.1.1.2"}}

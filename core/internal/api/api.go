@@ -1,12 +1,14 @@
 // Package api implements the REST API surface served under /api/* by knotd.
 //
-// The API is JSON over HTTP. All requests and responses use UTF-8 JSON.
-// Errors are returned in a consistent shape:
+// Endpoint groups:
+//   - public:    /api/status, /api/auth/login    — no session required
+//   - protected: /api/config, /api/auth/logout   — session cookie required
+//   - setup:     /api/setup/*                    — only when role=setup;
+//                added by setupapi.Mount in a separate file.
+//
+// Errors are returned in a uniform shape:
 //
 //	{ "error": { "code": "...", "message": "..." } }
-//
-// In M2 the API exposes the configuration document and a status endpoint.
-// Auth is added in M4.
 package api
 
 import (
@@ -17,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/network"
 )
@@ -31,6 +34,7 @@ type Server struct {
 	configPath string
 	version    string
 	backend    network.Backend
+	sessions   *auth.Sessions
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -38,24 +42,23 @@ type Server struct {
 
 // Options is the constructor input.
 type Options struct {
-	// ConfigPath is the on-disk location of config.yaml. The API persists
-	// changes here.
 	ConfigPath string
-	// Initial is the in-memory config snapshot loaded at startup.
-	Initial config.Config
-	// Version is the running knotd version, surfaced via /api/status.
-	Version string
-	// Backend is the network backend used to apply config changes and
-	// report runtime status. Required.
-	Backend network.Backend
+	Initial    config.Config
+	Version    string
+	Backend    network.Backend
+	Sessions   *auth.Sessions
 }
 
 // New constructs a Server.
 func New(opts Options) *Server {
+	if opts.Sessions == nil {
+		opts.Sessions = auth.NewSessions()
+	}
 	return &Server{
 		configPath: opts.ConfigPath,
 		version:    opts.Version,
 		backend:    opts.Backend,
+		sessions:   opts.Sessions,
 		cfg:        opts.Initial,
 	}
 }
@@ -67,27 +70,60 @@ func (s *Server) Handler() http.Handler {
 	r.NotFound(notFound)
 	r.MethodNotAllowed(methodNotAllowed)
 
+	// Public endpoints — reachable without authentication.
 	r.Get("/status", s.handleStatus)
-	r.Get("/config", s.handleGetConfig)
-	r.Put("/config", s.handlePutConfig)
+	r.Post("/auth/login", s.handleLogin)
+
+	// Protected group — middleware applies only to routes registered
+	// inside the closure. Unknown paths still hit the outer NotFound,
+	// not the auth middleware.
+	r.Group(func(r chi.Router) {
+		r.Use(s.sessions.Middleware(unauthorizedJSON))
+		r.Get("/config", s.handleGetConfig)
+		r.Put("/config", s.handlePutConfig)
+		r.Post("/auth/logout", s.handleLogout)
+		r.Get("/auth/me", s.handleMe)
+	})
 
 	return r
 }
 
-// Snapshot returns a deep-ish copy of the current config. Maps are shared
-// for now — callers must not mutate the returned value.
+// Snapshot returns the current in-memory config. Callers must not mutate it.
 func (s *Server) Snapshot() config.Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cfg
 }
 
-// --- handlers ----------------------------------------------------------------
+// SetConfig atomically swaps the in-memory config. Used by the setup
+// flow to publish the final config after the wizard runs. The caller is
+// responsible for persisting to disk first.
+func (s *Server) SetConfig(c config.Config) {
+	s.mu.Lock()
+	s.cfg = c
+	s.mu.Unlock()
+}
+
+// ConfigPath returns the on-disk path the API persists to. Used by the
+// setup handler so it writes to the same place.
+func (s *Server) ConfigPath() string { return s.configPath }
+
+// Backend returns the active network backend. Exposed so the setup
+// handler can scan Wi-Fi and apply the final config without holding a
+// duplicate reference.
+func (s *Server) Backend() network.Backend { return s.backend }
+
+// Sessions returns the session store so the setup handler can issue a
+// fresh session immediately after the wizard finishes.
+func (s *Server) Sessions() *auth.Sessions { return s.sessions }
+
+// --- public handlers --------------------------------------------------------
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	name := s.cfg.Device.Name
-	configRole := s.cfg.Role
+	role := s.cfg.Role
+	authConfigured := s.cfg.Auth.PasswordHash != ""
 	s.mu.RUnlock()
 
 	netStatus, err := s.backend.Status(r.Context())
@@ -97,12 +133,50 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":     s.version,
-		"device":      name,
-		"role":        configRole,
-		"network":     netStatus,
+		"version":         s.version,
+		"device":          name,
+		"role":            role,
+		"auth_configured": authConfigured,
+		"network":         netStatus,
 	})
 }
+
+type loginRequest struct {
+	Password string `json:"password"`
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	s.mu.RLock()
+	hash := s.cfg.Auth.PasswordHash
+	s.mu.RUnlock()
+
+	if hash == "" {
+		// Auth not yet configured — login is meaningless. The UI should
+		// be on the setup wizard instead.
+		writeError(w, http.StatusConflict, "not_configured", "admin password is not set; complete the setup wizard first")
+		return
+	}
+	if err := auth.CheckPassword(hash, req.Password); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "wrong password")
+		return
+	}
+
+	sess, err := s.sessions.Issue()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "session_failed", err.Error())
+		return
+	}
+	setSessionCookie(w, sess.Token)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// --- protected handlers ------------------------------------------------------
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
@@ -116,14 +190,18 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
+
+	// Auth fields are not transmitted over the API (json:"-") so the
+	// incoming config has Auth zeroed. Carry over the existing hash
+	// from the in-memory state to avoid wiping it on every save.
+	s.mu.RLock()
+	incoming.Auth = s.cfg.Auth
+	s.mu.RUnlock()
+
 	if err := incoming.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_config", err.Error())
 		return
 	}
-
-	// Apply to the network stack first; if that fails, do not persist —
-	// keeping disk and live state divergent would be much worse than
-	// rejecting the change. On success, persist atomically.
 	if err := s.backend.Apply(r.Context(), incoming); err != nil {
 		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
 		return
@@ -135,11 +213,53 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.cfg = incoming
 	s.mu.Unlock()
-
 	writeJSON(w, http.StatusOK, incoming)
 }
 
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(auth.CookieName); err == nil {
+		s.sessions.Revoke(c.Value)
+	}
+	clearSessionCookie(w)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	sess, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no_session", "no session attached")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"created_at": sess.CreatedAt.UTC(),
+		"expires_at": sess.ExpiresAt.UTC(),
+	})
+}
+
 // --- helpers -----------------------------------------------------------------
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		// Secure not set: knotd serves HTTP on port 80 inside the LAN
+		// for v0.1. HTTPS lands later, then this becomes Secure: true.
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.WriteHeader(status)
@@ -167,4 +287,8 @@ func notFound(w http.ResponseWriter, _ *http.Request) {
 
 func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed for this endpoint")
+}
+
+func unauthorizedJSON(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 }

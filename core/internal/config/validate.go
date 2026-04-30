@@ -30,8 +30,12 @@ func (c Config) Validate() error {
 
 	switch c.Role {
 	case RoleSetup:
-		// Setup mode does not require uplink/AP/LAN to be filled in.
+		// Setup mode does not require uplink/AP/LAN or auth to be set —
+		// the wizard fills them in.
 	case RoleWiFiExtender:
+		if c.Auth.PasswordHash == "" {
+			return fmt.Errorf("auth.password_hash: must be set outside of setup mode")
+		}
 		if err := c.Network.validateExtender(); err != nil {
 			return fmt.Errorf("network: %w", err)
 		}

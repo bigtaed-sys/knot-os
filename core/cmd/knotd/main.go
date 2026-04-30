@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/knot-os/knot-os/core/internal/api"
+	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
@@ -70,6 +71,7 @@ func main() {
 		Initial:    cfg,
 		Version:    Version,
 		Backend:    backend,
+		Sessions:   auth.NewSessions(),
 	})
 
 	srv := httpserver.New(httpserver.Options{
