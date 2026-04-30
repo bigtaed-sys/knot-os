@@ -35,6 +35,19 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+	const res = await fetch(`${API_BASE}${path}`, {
+		method: 'PUT',
+		credentials: 'same-origin',
+		headers: { 'content-type': 'application/json' },
+		body: body === undefined ? undefined : JSON.stringify(body)
+	});
+	if (!res.ok) {
+		throw new ApiError(`PUT ${path} → ${res.status}`, res.status, await safeJson(res));
+	}
+	return res.json() as Promise<T>;
+}
+
 async function safeJson(res: Response): Promise<unknown> {
 	try {
 		return await res.json();

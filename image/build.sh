@@ -68,6 +68,21 @@ chmod +x "$FILES_DIR/knotd" "$FILES_DIR/knotctl"
 echo "    knotd:    $(stat -c '%s' "$FILES_DIR/knotd")    bytes"
 echo "    knotctl:  $(stat -c '%s' "$FILES_DIR/knotctl")  bytes"
 
+# Stage bundled plugins so the image has them on first boot.
+PLUGIN_FILES_DIR="$STAGE_DIR/01-install-plugins/files"
+echo "    staging plugins from $ROOT/plugins"
+rm -rf "${PLUGIN_FILES_DIR:?}"/*
+shopt -s nullglob
+for p in "$ROOT/plugins"/*/; do
+    name="$(basename "$p")"
+    [[ "$name" == "README.md" ]] && continue
+    if [[ -f "$p/plugin.yaml" ]]; then
+        cp -r "$p" "$PLUGIN_FILES_DIR/"
+        echo "      + $name"
+    fi
+done
+shopt -u nullglob
+
 # ---- 3. Pull pi-gen --------------------------------------------------------
 
 echo "==> [3/5] Preparing pi-gen ($PIGEN_REF)"

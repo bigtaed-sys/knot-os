@@ -55,6 +55,8 @@
 		<header>
 			<a href="/" class="brand">KnotOS</a>
 			<nav>
+				<a href="/" class="link">Dashboard</a>
+				<a href="/plugins" class="link">Plugins</a>
 				<button class="link" onclick={logout}>Logout</button>
 			</nav>
 		</header>

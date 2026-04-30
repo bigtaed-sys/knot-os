@@ -1,0 +1,4 @@
+id: example-hello
+name: Hello Plugin
+version: 0.1.0
+description: A reference plugin that demonstrates discovery and enable/disable. Does not run any code yet — that ships with the plugin runtime in v0.2.

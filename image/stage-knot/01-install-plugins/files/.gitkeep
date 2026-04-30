@@ -1,0 +1,2 @@
+image/build.sh stages bundled plugins from ../../plugins/ into this
+directory before invoking pi-gen.

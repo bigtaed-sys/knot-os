@@ -42,3 +42,15 @@ export interface ScannedNetwork {
 export interface ScanResponse {
 	networks: ScannedNetwork[];
 }
+
+export interface Plugin {
+	id: string;
+	name: string;
+	version: string;
+	description?: string;
+	enabled: boolean;
+}
+
+export interface PluginsResponse {
+	plugins: Plugin[];
+}

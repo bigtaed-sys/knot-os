@@ -20,6 +20,8 @@
 /image/pi-gen/
 /image/stage-knot/00-install-knotd/files/knotd
 /image/stage-knot/00-install-knotd/files/knotctl
+/image/stage-knot/01-install-plugins/files/example-hello/
+/image/stage-knot/01-install-plugins/files/*/
 
 # Editor / OS
 .DS_Store
