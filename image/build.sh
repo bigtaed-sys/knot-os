@@ -118,13 +118,14 @@ if [[ -f "$PIGEN_DIR/depends" ]]; then
     sed -i '/qemu-user-binfmt/d' "$PIGEN_DIR/depends"
 fi
 
-# Skip the heavy desktop stages and the secondary export-stages; we only
-# need stages 0-2 (Lite base) before our stage runs.
+# Defense in depth — even with STAGE_LIST below, leave SKIP files in
+# the desktop stages in case STAGE_LIST is ever overridden via env.
 for s in stage3 stage4 stage5; do
     : > "$PIGEN_DIR/$s/SKIP" 2>/dev/null || true
     : > "$PIGEN_DIR/$s/SKIP_IMAGES" 2>/dev/null || true
 done
-# We export only our stage.
+# stage2 emits its own image by default; suppress it so only our stage
+# produces an artifact.
 : > "$PIGEN_DIR/stage2/SKIP_IMAGES"
 
 # ---- 4. Write pi-gen config ------------------------------------------------
@@ -142,6 +143,13 @@ TIMEZONE_DEFAULT='Etc/UTC'
 FIRST_USER_NAME='knot'
 FIRST_USER_PASS='knot'
 DISABLE_FIRST_BOOT_USER_RENAME=1
+
+# Explicit stage order. The default \${BASE_DIR}/stage* glob expands
+# alphabetically, and "stage-knot" (hyphen = ASCII 0x2D) sorts BEFORE
+# "stage0" (0 = ASCII 0x30) — which makes our stage run first, before
+# the base rootfs exists, and "Previous stage rootfs not found"
+# kills the build. Listing stages by hand fixes the order.
+STAGE_LIST='stage0 stage1 stage2 stage-knot'
 
 # arm64 build (Pi Zero 2W is ARMv8 64-bit). Pi-gen's recent versions
 # accept --arch via env; older versions may need master branch.
