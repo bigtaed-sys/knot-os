@@ -62,13 +62,34 @@ Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
 
 - Go 1.22+ and Node 18+ on `PATH` (these run as your normal user, not root).
 
-### One-shot build
+### One-shot build (Linux / macOS)
 
 ```bash
 sudo bash image/build.sh
 ```
 
 Takes 30–60 minutes on a typical laptop. The output is `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
+
+### One-shot build (Windows)
+
+Use the PowerShell wrapper — it drives WSL2 for you.
+
+```powershell
+.\image\build.ps1
+```
+
+Or double-click `image\build.bat` in Explorer.
+
+The wrapper auto-picks an Ubuntu distro, installs the apt packages pi-gen needs (the first run takes a few extra minutes for `apt install`), syncs the repo into WSL's native filesystem (`~/.knot-os-build/`), runs the build there, and copies the resulting `.img.xz` back into `image\deploy\`.
+
+> **Why not just run pi-gen on `/mnt/e/...` directly?** The 9P protocol that exposes Windows drives inside WSL2 doesn't support every operation pi-gen needs (some `chmod`/`mknod` flags, sgid bits). Building from `~/...` inside the distro is reliable; building from `/mnt/...` fails partway through.
+
+Useful flags:
+
+| Flag | Effect |
+|------|--------|
+| `-Distro Ubuntu-22.04` | Pick a specific WSL distro instead of the auto-chosen one. |
+| `-Clean` | Wipe `~/.knot-os-build/` in WSL before syncing — start fresh. |
 
 ### Flashing
 
