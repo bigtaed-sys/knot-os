@@ -8,7 +8,7 @@ The project is designed to scale across hardware: a Raspberry Pi Zero 2W can run
 
 ## Status
 
-**Pre-alpha, v0.1 in flight.** The daemon, UI, mock backend, Linux backend (hostapd / wpa_supplicant / dnsmasq / nftables / `iw`), authentication, and first-run wizard are all in place. `image/build.sh` produces a flashable Pi Zero 2W image. Plugin system and on-hardware acceptance testing are the remaining v0.1 work.
+**v0.1.0 — first release.** Builds a flashable image for Raspberry Pi Zero 2W that boots into a first-run wizard and configures itself as a Wi-Fi extender. See [CHANGELOG.md](CHANGELOG.md) for what works, the known limitations, and what's deferred.
 
 ## Hardware support
 
@@ -52,4 +52,24 @@ The license split mirrors the OpenWrt model: copyleft on the firmware to prevent
 
 ## Contributing
 
-The project is in early scaffolding. Issues and design discussions are welcome; pull requests should wait until the v0.1 milestone closes and the contribution guidelines are in place.
+Issues and design discussions are very welcome. Pull requests are accepted but please open a discussion first for anything beyond a small fix — the architecture is still settling and a quick check saves rework.
+
+### Quick development loop
+
+```bash
+# Daemon in dev mode (mock network, no root)
+go build -o ./dist/knotd ./core/cmd/knotd
+./dist/knotd -dev -listen :8080 -config ./tmp/config.yaml
+
+# UI dev server in another terminal (live reload, proxies /api to :8080)
+cd ui && npm run dev
+```
+
+### Test suite
+
+```bash
+go test ./core/...
+cd ui && npm run check
+```
+
+CI runs on every push: vet, native build, `linux/arm64` cross-build, the full test suite, plus the SvelteKit typecheck and bundle. Image building is not part of CI — it runs on demand via `image/build.sh` (see [docs/building.md](docs/building.md)).
