@@ -15,7 +15,29 @@ import (
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
+	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
 )
+
+// listenPort returns the numeric port from a listen address like ":80"
+// or "127.0.0.1:8080". Used by LinuxBackend to set up captive-portal
+// DNAT rules pointing at knotd.
+func listenPort(addr string) int {
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			n := 0
+			for _, c := range addr[i+1:] {
+				if c < '0' || c > '9' {
+					return 80
+				}
+				n = n*10 + int(c-'0')
+			}
+			if n > 0 {
+				return n
+			}
+		}
+	}
+	return 80
+}
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 var Version = "0.0.0-dev"
@@ -51,13 +73,22 @@ func main() {
 	}
 	logger.Printf("config loaded: device=%q role=%q", cfg.Device.Name, cfg.Role)
 
-	// Pick a backend. M2 only ships the mock; the real LinuxBackend
-	// arrives in M5. Until then, even a non-dev run uses the mock —
-	// running on a real Pi without the Linux backend does no harm because
-	// the mock simply records calls.
-	var backend network.Backend = network.NewMock()
-	if !*dev {
-		logger.Printf("note: linux backend not yet implemented (M5) — falling back to mock")
+	// Pick a backend. -dev uses the mock everywhere; otherwise we
+	// build the LinuxBackend (which only compiles fully on Linux —
+	// on other OSes it's a stub that errors out on every method).
+	var backend network.Backend
+	if *dev {
+		backend = network.NewMock()
+	} else {
+		lb := netlinux.New(netlinux.Options{
+			Logger:   logger,
+			HTTPPort: listenPort(*listenAddr),
+		})
+		if err := lb.Init(ctx); err != nil {
+			logger.Fatalf("linux backend init: %v", err)
+		}
+		defer lb.Close()
+		backend = lb
 	}
 
 	// Apply the loaded config to the backend immediately so /api/status
