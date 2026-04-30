@@ -43,12 +43,18 @@ fi
 # Run Go and npm as the original (non-root) user where possible to
 # avoid littering home dirs with root-owned caches. SUDO_USER is set
 # when invoked via sudo; falls back to root if directly logged in.
+#
+# `sudo -E` alone is not enough — it preserves HOME=/root from the
+# parent environment, and then npm/go (running as the target user)
+# blow up trying to read root-owned $HOME/.npm and $HOME/.cache. We
+# need -H so HOME is reset to the target user's home, while keeping
+# -E so PATH / GOPATH / etc. survive.
 RUN_AS_USER="${SUDO_USER:-root}"
 run_user() {
     if [[ "$RUN_AS_USER" == "root" ]]; then
         "$@"
     else
-        sudo -u "$RUN_AS_USER" -E "$@"
+        sudo -u "$RUN_AS_USER" -H -E "$@"
     fi
 }
 
