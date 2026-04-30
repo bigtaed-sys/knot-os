@@ -8,7 +8,7 @@ The project is designed to scale across hardware: a Raspberry Pi Zero 2W can run
 
 ## Status
 
-**Pre-alpha.** The repository is a skeleton; nothing is functional yet. See [the v0.1 plan](docs/architecture.md) for the roadmap.
+**Pre-alpha, v0.1 in flight.** The daemon, UI, mock backend, Linux backend (hostapd / wpa_supplicant / dnsmasq / nftables / `iw`), authentication, and first-run wizard are all in place. `image/build.sh` produces a flashable Pi Zero 2W image. Plugin system and on-hardware acceptance testing are the remaining v0.1 work.
 
 ## Hardware support
 
