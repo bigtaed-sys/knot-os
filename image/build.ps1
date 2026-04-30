@@ -55,9 +55,30 @@ if ($distros.Count -eq 0) {
 }
 
 if (-not $Distro) {
-    # Prefer Ubuntu*, otherwise first available.
-    $Distro = ($distros | Where-Object { $_ -match '^Ubuntu' } | Select-Object -First 1)
-    if (-not $Distro) { $Distro = $distros[0] }
+    # Default: Ubuntu. Prefer the bare "Ubuntu" distro (it tracks the
+    # latest LTS); fall back to the newest "Ubuntu-XX.YY" available.
+    $ubuntus = @($distros | Where-Object { $_ -match '^Ubuntu' })
+    if ($ubuntus -contains 'Ubuntu') {
+        $Distro = 'Ubuntu'
+    } elseif ($ubuntus.Count -gt 0) {
+        $Distro = ($ubuntus | Sort-Object -Descending | Select-Object -First 1)
+    } else {
+        Write-Host ''
+        Write-Host 'No Ubuntu distro is installed in WSL.' -ForegroundColor Red
+        Write-Host 'KnotOS image builds require Ubuntu (22.04 or newer).'
+        Write-Host ''
+        Write-Host 'Install it with:' -ForegroundColor Yellow
+        Write-Host '    wsl --install -d Ubuntu'
+        Write-Host ''
+        Write-Host 'After install, finish first-run setup (create a Linux user) and re-run this script.'
+        Write-Host ''
+        if ($distros.Count -gt 0) {
+            Write-Host 'Other (non-Ubuntu) distros detected on this machine:'
+            $distros | ForEach-Object { Write-Host "  - $_" }
+            Write-Host 'Use them explicitly with -Distro <name> at your own risk; only Ubuntu is tested.'
+        }
+        exit 1
+    }
 }
 elseif ($distros -notcontains $Distro) {
     Write-Host "Distro '$Distro' is not installed. Available:" -ForegroundColor Red
