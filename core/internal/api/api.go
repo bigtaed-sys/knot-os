@@ -22,6 +22,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/network"
+	"github.com/knot-os/knot-os/core/internal/plugin"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -35,6 +36,7 @@ type Server struct {
 	version    string
 	backend    network.Backend
 	sessions   *auth.Sessions
+	plugins    *plugin.Registry
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -47,6 +49,7 @@ type Options struct {
 	Version    string
 	Backend    network.Backend
 	Sessions   *auth.Sessions
+	Plugins    *plugin.Registry
 }
 
 // New constructs a Server.
@@ -59,6 +62,7 @@ func New(opts Options) *Server {
 		version:    opts.Version,
 		backend:    opts.Backend,
 		sessions:   opts.Sessions,
+		plugins:    opts.Plugins,
 		cfg:        opts.Initial,
 	}
 }
@@ -83,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 		r.Put("/config", s.handlePutConfig)
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/auth/me", s.handleMe)
+		s.MountPlugins(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

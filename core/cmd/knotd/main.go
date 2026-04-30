@@ -16,6 +16,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
+	"github.com/knot-os/knot-os/core/internal/plugin"
 )
 
 // listenPort returns the numeric port from a listen address like ":80"
@@ -48,6 +49,7 @@ func main() {
 		dev         = flag.Bool("dev", false, "run in dev mode with mock network backend")
 		configPath  = flag.String("config", "/etc/knot/config.yaml", "path to configuration file")
 		listenAddr  = flag.String("listen", ":80", "HTTP listen address")
+		pluginsDir  = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 	)
 	flag.Parse()
 
@@ -97,12 +99,28 @@ func main() {
 		logger.Fatalf("initial apply: %v", err)
 	}
 
+	plugins := plugin.NewRegistry(*pluginsDir)
+	if err := plugins.Discover(); err != nil {
+		// Discovery errors are non-fatal: bad plugins are skipped,
+		// good ones still load. We log so operators know.
+		logger.Printf("plugin discovery: %v", err)
+	}
+	// Apply enabled-state from config so a previously-enabled plugin
+	// stays enabled across reboots.
+	enabled := make(map[string]bool, len(cfg.Plugins))
+	for id, pc := range cfg.Plugins {
+		enabled[id] = pc.Enabled
+	}
+	plugins.ApplyEnabledMap(enabled)
+	logger.Printf("plugins: %d discovered in %s", len(plugins.List()), *pluginsDir)
+
 	apiSrv := api.New(api.Options{
 		ConfigPath: *configPath,
 		Initial:    cfg,
 		Version:    Version,
 		Backend:    backend,
 		Sessions:   auth.NewSessions(),
+		Plugins:    plugins,
 	})
 
 	srv := httpserver.New(httpserver.Options{
