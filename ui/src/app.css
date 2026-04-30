@@ -1,0 +1,28 @@
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: #ffffff;
+	color: #111827;
+}
+
+a {
+	color: #2563eb;
+}
+
+a:hover {
+	color: #1d4ed8;
+}
+
+code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	background: #f3f4f6;
+	padding: 0.1em 0.3em;
+	border-radius: 4px;
+}

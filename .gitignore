@@ -1,0 +1,33 @@
+# Go
+/core/bin/
+/cli/bin/
+/dist/
+*.test
+*.out
+
+# UI
+/ui/node_modules/
+/ui/.svelte-kit/
+/ui/build/
+/ui/.vite/
+
+# Image build artifacts
+/image/deploy/
+/image/work/
+/image/pi-gen/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local dev state
+/tmp/
+*.log
+
+# Local tooling state
+.claude/
+/dist/

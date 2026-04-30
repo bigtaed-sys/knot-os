@@ -1,0 +1,18 @@
+# Force LF line endings for all text files in the repo,
+# regardless of host OS (Windows/macOS/Linux). Shell scripts
+# and Linux-bound configs would break with CRLF.
+* text=auto eol=lf
+
+# Explicit binary classification — never CRLF-converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.img binary
+*.img.xz binary
+*.tar binary
+*.tar.gz binary
+*.tar.xz binary
