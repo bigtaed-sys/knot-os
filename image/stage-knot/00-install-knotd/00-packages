@@ -1,0 +1,11 @@
+hostapd
+wpasupplicant
+dnsmasq
+nftables
+iw
+wireless-regdb
+crda
+isc-dhcp-client
+avahi-daemon
+iproute2
+ca-certificates

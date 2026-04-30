@@ -1,0 +1,29 @@
+[Unit]
+Description=KnotOS network daemon
+Documentation=https://github.com/bigtaed-sys/knot-os
+# Run after the kernel has set up loopback and basic networking,
+# but before any other network-related service starts. We are the
+# network manager.
+After=network-pre.target local-fs.target
+Before=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/knotd -config /etc/knot/config.yaml -listen :80
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+# knotd manages netlink, nftables, and supervises hostapd/dnsmasq —
+# CAP_NET_ADMIN at minimum. Easier to just run as root for v0.1; a
+# follow-up will switch to a knot user with capability bounding.
+User=root
+Group=root
+
+# Stay attached to the journal — supervised child processes of
+# hostapd/wpa_supplicant/dnsmasq inherit stdout/stderr.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

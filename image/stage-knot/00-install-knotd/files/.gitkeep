@@ -1,0 +1,3 @@
+image/build.sh stages cross-compiled knotd and knotctl binaries
+into this directory before invoking pi-gen. They are produced fresh
+on every build and should never be checked into git.

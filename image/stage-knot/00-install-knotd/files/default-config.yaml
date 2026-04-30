@@ -1,0 +1,16 @@
+# Seed config flashed onto every fresh KnotOS image. The first-run
+# wizard rewrites this file once the user picks a name, password,
+# and Wi-Fi networks. Until then, the device boots into role=setup
+# and broadcasts an open onboarding AP.
+device:
+  name: knot
+  country: "00"
+role: setup
+auth:
+  password_hash: ""
+network:
+  lan:
+    cidr: 192.168.42.0/24
+    dhcp:
+      pool_start: 192.168.42.100
+      pool_end: 192.168.42.200

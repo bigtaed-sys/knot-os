@@ -18,6 +18,8 @@
 /image/deploy/
 /image/work/
 /image/pi-gen/
+/image/stage-knot/00-install-knotd/files/knotd
+/image/stage-knot/00-install-knotd/files/knotctl
 
 # Editor / OS
 .DS_Store
