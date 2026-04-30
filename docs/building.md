@@ -55,9 +55,10 @@ Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
   ```bash
   sudo apt update
   sudo apt install -y \
-    quilt parted qemu-user-static debootstrap zerofree \
-    zip dosfstools libcap2-bin grep rsync xz-utils file \
-    git curl bc binfmt-support qemu-utils kpartx pigz arch-test
+    quilt parted qemu-user-static qemu-user-binfmt qemu-utils \
+    debootstrap zerofree zip dosfstools libcap2-bin libarchive-tools \
+    grep rsync xz-utils file git curl bc binfmt-support kpartx pigz \
+    arch-test pv xxd coreutils gnupg ca-certificates
   ```
 
 - Go 1.22+ and Node 18+ on `PATH` (these run as your normal user, not root).

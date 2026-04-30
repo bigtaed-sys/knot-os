@@ -130,7 +130,21 @@ Write-Host "  user: $linuxUser"
 # Verify required tools exist; install on demand. Package names contain
 # no whitespace, so we can leave them unquoted in the bash loop and
 # avoid quote-escape gymnastics.
-$aptPackages = 'quilt parted qemu-user-static debootstrap zerofree zip dosfstools libcap2-bin grep rsync xz-utils file git curl bc binfmt-support qemu-utils kpartx pigz arch-test golang-go nodejs npm'
+#
+# This list mirrors pi-gen's own depends file plus the toolchains we
+# need (Go, Node) for the cross-compile / UI build steps. Keep it in
+# sync with upstream pi-gen/depends if a build fails citing missing
+# packages.
+$aptPackages = @(
+    'quilt', 'parted',
+    'qemu-user-static', 'qemu-user-binfmt', 'qemu-utils',
+    'debootstrap', 'zerofree', 'zip', 'dosfstools',
+    'libcap2-bin', 'libarchive-tools',
+    'grep', 'rsync', 'xz-utils', 'file', 'git', 'curl', 'bc',
+    'binfmt-support', 'kpartx', 'pigz', 'arch-test',
+    'pv', 'xxd', 'coreutils', 'gnupg', 'ca-certificates',
+    'golang-go', 'nodejs', 'npm'
+) -join ' '
 $checkCmd = 'for p in ' + $aptPackages + '; do dpkg -s $p >/dev/null 2>&1 || echo $p; done'
 $missing = (& wsl.exe -d $Distro -e bash -lc $checkCmd | Out-String).Trim()
 if ($missing) {

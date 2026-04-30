@@ -92,12 +92,16 @@ shopt -u nullglob
 # ---- 3. Pull pi-gen --------------------------------------------------------
 
 echo "==> [3/5] Preparing pi-gen ($PIGEN_REF)"
+# pi-gen runs as root and uses `git` against this directory internally
+# (e.g. for revision stamping). If we clone as the unprivileged user,
+# git's "dubious ownership" check rejects every later operation. Clone
+# as root so the directory matches the privilege level pi-gen runs at.
 if [[ ! -d "$PIGEN_DIR/.git" ]]; then
-    run_user git clone --depth=1 --branch="$PIGEN_REF" "$PIGEN_REPO" "$PIGEN_DIR"
+    git clone --depth=1 --branch="$PIGEN_REF" "$PIGEN_REPO" "$PIGEN_DIR"
 else
-    run_user git -C "$PIGEN_DIR" fetch origin "$PIGEN_REF"
-    run_user git -C "$PIGEN_DIR" checkout -q "$PIGEN_REF"
-    run_user git -C "$PIGEN_DIR" reset --hard "origin/$PIGEN_REF"
+    git -C "$PIGEN_DIR" fetch origin "$PIGEN_REF"
+    git -C "$PIGEN_DIR" checkout -q "$PIGEN_REF"
+    git -C "$PIGEN_DIR" reset --hard "origin/$PIGEN_REF"
 fi
 
 # Symlink (not copy) our stage into pi-gen so source stays canonical.
