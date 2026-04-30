@@ -2,6 +2,9 @@
 /core/bin/
 /cli/bin/
 /dist/
+/knotd
+/knotctl
+*.exe
 *.test
 *.out
 
