@@ -133,10 +133,7 @@ func (b *LinuxBackend) Status(_ context.Context) (network.Status, error) {
 	return st, nil
 }
 
-// Scan implements network.Backend. Real implementation lands in M5e.
-func (b *LinuxBackend) Scan(_ context.Context) ([]network.ScannedNetwork, error) {
-	return nil, errors.New("LinuxBackend.Scan: not yet implemented (M5e)")
-}
+// Scan is implemented in scan.go.
 
 // Close stops every supervised daemon. Intended for shutdown only.
 func (b *LinuxBackend) Close() {
