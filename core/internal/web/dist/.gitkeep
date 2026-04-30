@@ -1,0 +1,2 @@
+This directory is populated by scripts/build-ui.sh before `go build`.
+The .gitkeep ensures `//go:embed all:dist` always has at least one file.

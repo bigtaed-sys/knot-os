@@ -6,11 +6,17 @@ on:
   pull_request:
 
 jobs:
-  go:
-    name: Go (build + test)
+  build:
+    name: Build (UI + Go)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
 
       - uses: actions/setup-go@v5
         with:
@@ -19,12 +25,15 @@ jobs:
             core/go.sum
             cli/go.sum
 
+      - name: Build UI and stage for embed
+        run: bash scripts/build-ui.sh
+
       - name: Vet
         run: |
           go vet ./core/...
           go vet ./cli/...
 
-      - name: Build native
+      - name: Build native (linux/amd64)
         run: |
           go build ./core/cmd/knotd
           go build ./cli/cmd/knotctl
@@ -38,21 +47,6 @@ jobs:
         run: |
           go test ./core/... ./cli/...
 
-  ui:
-    name: UI (build)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+      - name: UI typecheck
         working-directory: ui
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - run: npm ci
-      - run: npm run check
-      - run: npm run build
+        run: npm run check

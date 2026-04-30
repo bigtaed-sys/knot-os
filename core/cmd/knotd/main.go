@@ -2,10 +2,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/knot-os/knot-os/core/internal/httpserver"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
@@ -25,15 +30,24 @@ func main() {
 		return
 	}
 
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
-	log.SetPrefix("knotd: ")
+	logger := log.New(os.Stderr, "knotd: ", log.LstdFlags|log.Lmsgprefix)
 
+	mode := "linux backend"
 	if *dev {
-		log.Printf("starting in dev mode (mock network backend), config=%s, listen=%s", *configPath, *listenAddr)
-	} else {
-		log.Printf("starting (linux backend), config=%s, listen=%s", *configPath, *listenAddr)
+		mode = "dev mode (mock network backend)"
 	}
+	logger.Printf("starting %s — version=%s config=%s listen=%s", mode, Version, *configPath, *listenAddr)
 
-	log.Println("not implemented yet — this is the M1 skeleton")
-	os.Exit(0)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	srv := httpserver.New(httpserver.Options{
+		Addr:   *listenAddr,
+		Logger: logger,
+	})
+
+	if err := srv.Start(ctx); err != nil {
+		logger.Fatalf("server error: %v", err)
+	}
+	logger.Println("shutdown complete")
 }
