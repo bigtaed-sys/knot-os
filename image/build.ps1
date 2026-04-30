@@ -137,7 +137,12 @@ Write-Host "  user: $linuxUser"
 # packages.
 $aptPackages = @(
     'quilt', 'parted',
-    'qemu-user-static', 'qemu-user-binfmt', 'qemu-utils',
+    'qemu-user-static', 'qemu-utils',
+    # NOTE: do not list qemu-user-binfmt here. On Ubuntu 24.04 it
+    # was merged into qemu-user-static and the two now conflict —
+    # asking apt for both forces a removal of one. pi-gen's stock
+    # depends file still names qemu-user-binfmt; build.sh patches
+    # that out after cloning pi-gen.
     'debootstrap', 'zerofree', 'zip', 'dosfstools',
     'libcap2-bin', 'libarchive-tools',
     'grep', 'rsync', 'xz-utils', 'file', 'git', 'curl', 'bc',
@@ -167,7 +172,11 @@ $dst   = "/home/$linuxUser/.knot-os-build/"
 
 if ($Clean) {
     Write-Host "Cleaning $dst (WSL)..."
-    wsl-run "rm -rf '$dst'"
+    # pi-gen runs as root and leaves root-owned files (work/, deploy/)
+    # all over the build dir. The user-level wsl-run can't delete
+    # them; use root explicitly.
+    & wsl.exe -d $Distro -u root -e bash -lc "rm -rf '$dst'"
+    if ($LASTEXITCODE -ne 0) { throw "clean failed" }
 }
 
 Write-Host "Syncing source: $src -> $dst (WSL)"

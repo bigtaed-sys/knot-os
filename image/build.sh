@@ -107,6 +107,17 @@ fi
 # Symlink (not copy) our stage into pi-gen so source stays canonical.
 ln -sfn "$STAGE_DIR" "$PIGEN_DIR/stage-knot"
 
+# pi-gen's depends file still references qemu-user-binfmt as a hard
+# requirement. Ubuntu 24.04 (noble) merged that package into
+# qemu-user-static — they conflict at the apt level — so the package
+# `qemu-user-binfmt` literally does not exist on noble anymore.
+# Strip the line so pi-gen's dep check passes; the binfmt registration
+# we actually need is provided by qemu-user-static. No-op on hosts
+# where the line is already absent.
+if [[ -f "$PIGEN_DIR/depends" ]]; then
+    sed -i '/qemu-user-binfmt/d' "$PIGEN_DIR/depends"
+fi
+
 # Skip the heavy desktop stages and the secondary export-stages; we only
 # need stages 0-2 (Lite base) before our stage runs.
 for s in stage3 stage4 stage5; do
