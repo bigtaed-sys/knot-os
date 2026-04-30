@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/network"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -29,6 +30,7 @@ var ErrConfigNotInitialized = errors.New("api: config not initialized")
 type Server struct {
 	configPath string
 	version    string
+	backend    network.Backend
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -43,6 +45,9 @@ type Options struct {
 	Initial config.Config
 	// Version is the running knotd version, surfaced via /api/status.
 	Version string
+	// Backend is the network backend used to apply config changes and
+	// report runtime status. Required.
+	Backend network.Backend
 }
 
 // New constructs a Server.
@@ -50,6 +55,7 @@ func New(opts Options) *Server {
 	return &Server{
 		configPath: opts.ConfigPath,
 		version:    opts.Version,
+		backend:    opts.Backend,
 		cfg:        opts.Initial,
 	}
 }
@@ -78,16 +84,23 @@ func (s *Server) Snapshot() config.Config {
 
 // --- handlers ----------------------------------------------------------------
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
-	role := s.cfg.Role
 	name := s.cfg.Device.Name
+	configRole := s.cfg.Role
 	s.mu.RUnlock()
 
+	netStatus, err := s.backend.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "backend_status_failed", err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version": s.version,
-		"device":  name,
-		"role":    role,
+		"version":     s.version,
+		"device":      name,
+		"role":        configRole,
+		"network":     netStatus,
 	})
 }
 
@@ -105,6 +118,14 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := incoming.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_config", err.Error())
+		return
+	}
+
+	// Apply to the network stack first; if that fails, do not persist —
+	// keeping disk and live state divergent would be much worse than
+	// rejecting the change. On success, persist atomically.
+	if err := s.backend.Apply(r.Context(), incoming); err != nil {
+		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
 		return
 	}
 	if err := config.Save(s.configPath, incoming); err != nil {

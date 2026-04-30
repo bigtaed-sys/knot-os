@@ -13,6 +13,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/api"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
+	"github.com/knot-os/knot-os/core/internal/network"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
@@ -49,10 +50,26 @@ func main() {
 	}
 	logger.Printf("config loaded: device=%q role=%q", cfg.Device.Name, cfg.Role)
 
+	// Pick a backend. M2 only ships the mock; the real LinuxBackend
+	// arrives in M5. Until then, even a non-dev run uses the mock —
+	// running on a real Pi without the Linux backend does no harm because
+	// the mock simply records calls.
+	var backend network.Backend = network.NewMock()
+	if !*dev {
+		logger.Printf("note: linux backend not yet implemented (M5) — falling back to mock")
+	}
+
+	// Apply the loaded config to the backend immediately so /api/status
+	// reports a state consistent with what's on disk.
+	if err := backend.Apply(ctx, cfg); err != nil {
+		logger.Fatalf("initial apply: %v", err)
+	}
+
 	apiSrv := api.New(api.Options{
 		ConfigPath: *configPath,
 		Initial:    cfg,
 		Version:    Version,
+		Backend:    backend,
 	})
 
 	srv := httpserver.New(httpserver.Options{

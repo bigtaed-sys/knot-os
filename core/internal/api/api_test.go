@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/network"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -18,6 +19,7 @@ func newTestServer(t *testing.T) *Server {
 		ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
 		Initial:    config.Default(),
 		Version:    "test",
+		Backend:    network.NewMock(),
 	})
 }
 
@@ -108,6 +110,57 @@ func TestPutConfigRejectsInvalid(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "invalid_config") {
 		t.Errorf("body should contain invalid_config code: %s", rec.Body)
+	}
+}
+
+func TestPutConfigInvokesBackendApply(t *testing.T) {
+	mock := network.NewMock()
+	srv := New(Options{
+		ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
+		Initial:    config.Default(),
+		Version:    "test",
+		Backend:    mock,
+	})
+
+	updated := config.Default()
+	updated.Device.Name = "knot-applied"
+	body, _ := json.Marshal(updated)
+	req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d (body=%s)", rec.Code, rec.Body)
+	}
+	if mock.Applies != 1 {
+		t.Fatalf("expected backend Apply to be called once, got %d", mock.Applies)
+	}
+	last, ok := mock.Last()
+	if !ok || last.Device.Name != "knot-applied" {
+		t.Fatalf("backend last config mismatch: ok=%v cfg=%+v", ok, last)
+	}
+}
+
+func TestStatusIncludesNetwork(t *testing.T) {
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	net, ok := body["network"].(map[string]any)
+	if !ok {
+		t.Fatalf("network field missing or wrong type: %#v", body["network"])
+	}
+	if net["backend"] != "mock" {
+		t.Errorf("backend: want \"mock\", got %v", net["backend"])
 	}
 }
 
