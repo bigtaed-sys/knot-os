@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/knot-os/knot-os/core/internal/api"
+	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 )
 
@@ -41,10 +43,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		logger.Fatalf("load config: %v", err)
+	}
+	logger.Printf("config loaded: device=%q role=%q", cfg.Device.Name, cfg.Role)
+
+	apiSrv := api.New(api.Options{
+		ConfigPath: *configPath,
+		Initial:    cfg,
+		Version:    Version,
+	})
+
 	srv := httpserver.New(httpserver.Options{
 		Addr:   *listenAddr,
 		Logger: logger,
 	})
+	srv.Mount("/api", apiSrv.Handler())
 
 	if err := srv.Start(ctx); err != nil {
 		logger.Fatalf("server error: %v", err)
