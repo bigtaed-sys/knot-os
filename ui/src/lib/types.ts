@@ -26,5 +26,19 @@ export interface SystemStatus {
 	version: string;
 	device: string;
 	role: Role;
+	auth_configured: boolean;
 	network: NetworkStatus;
+}
+
+export interface ScannedNetwork {
+	ssid: string;
+	bssid?: string;
+	channel: number;
+	band: '2.4' | '5';
+	rssi_dbm: number;
+	secured: boolean;
+}
+
+export interface ScanResponse {
+	networks: ScannedNetwork[];
 }

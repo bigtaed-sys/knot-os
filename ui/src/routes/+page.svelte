@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { apiGet, ApiError } from '$lib/api';
 	import type { SystemStatus } from '$lib/types';
 
@@ -9,9 +10,18 @@
 
 	async function refresh() {
 		try {
-			status = await apiGet<SystemStatus>('/status');
+			// /api/status is public and returns the live network shape.
+			// We probe a protected endpoint to detect "session expired"
+			// and bounce to /login if we are on the dashboard without
+			// a valid session.
+			const [s] = await Promise.all([apiGet<SystemStatus>('/status'), apiGet('/auth/me')]);
+			status = s;
 			error = null;
 		} catch (e) {
+			if (e instanceof ApiError && e.status === 401) {
+				goto('/login', { replaceState: true });
+				return;
+			}
 			error = e instanceof ApiError ? `${e.message}` : String(e);
 		}
 	}
