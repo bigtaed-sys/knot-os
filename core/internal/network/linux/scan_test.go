@@ -36,14 +36,14 @@ BSS aa:bb:cc:dd:ee:04(on wlan0)
 func TestParseIWScan(t *testing.T) {
 	nets := parseIWScan(sampleScan)
 	if len(nets) != 4 {
-		t.Fatalf("expected 4 networks, got %d", len(nets))
+		t.Fatalf("expected 4 scanResults, got %d", len(nets))
 	}
-	checkBy := func(ssid string, want network) {
+	checkBy := func(ssid string, want scanResult) {
 		t.Helper()
-		var found *network
+		var found *scanResult
 		for i := range nets {
 			if nets[i].SSID == ssid {
-				n := network{
+				n := scanResult{
 					BSSID: nets[i].BSSID, Channel: nets[i].Channel,
 					Band: nets[i].Band, RSSI: nets[i].RSSIdBm, Secured: nets[i].Secured,
 				}
@@ -59,13 +59,13 @@ func TestParseIWScan(t *testing.T) {
 			t.Errorf("ssid %q: got %+v, want %+v", ssid, *found, want)
 		}
 	}
-	checkBy("HomeWiFi", network{"aa:bb:cc:dd:ee:01", 6, "2.4", -45, true})
-	checkBy("Neighbor", network{"aa:bb:cc:dd:ee:02", 11, "2.4", -68, true})
-	checkBy("FreeCafe", network{"aa:bb:cc:dd:ee:03", 1, "2.4", -78, false})
-	checkBy("HomeWiFi-5G", network{"aa:bb:cc:dd:ee:04", 36, "5", -55, true})
+	checkBy("HomeWiFi", scanResult{"aa:bb:cc:dd:ee:01", 6, "2.4", -45, true})
+	checkBy("Neighbor", scanResult{"aa:bb:cc:dd:ee:02", 11, "2.4", -68, true})
+	checkBy("FreeCafe", scanResult{"aa:bb:cc:dd:ee:03", 1, "2.4", -78, false})
+	checkBy("HomeWiFi-5G", scanResult{"aa:bb:cc:dd:ee:04", 36, "5", -55, true})
 }
 
-type network struct {
+type scanResult struct {
 	BSSID   string
 	Channel int
 	Band    string
