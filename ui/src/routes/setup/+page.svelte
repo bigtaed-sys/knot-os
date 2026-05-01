@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { _ } from 'svelte-i18n';
 	import { goto } from '$app/navigation';
 	import { apiGet, apiPost, ApiError } from '$lib/api';
 	import type { ScanResponse, ScannedNetwork } from '$lib/types';
@@ -6,30 +7,29 @@
 	type Step = 1 | 2 | 3 | 4;
 	let step = $state<Step>(1);
 
-	// Step 1 — device + admin password
+	// Step 1
 	let deviceName = $state('knot');
 	let country = $state('RU');
 	let password = $state('');
 	let passwordConfirm = $state('');
-	let step1Error = $derived.by(() => {
-		if (!deviceName) return 'Device name is required.';
-		if (!/^[a-zA-Z0-9_-]{1,63}$/.test(deviceName))
-			return 'Device name: letters, digits, hyphen, underscore only.';
-		if (!/^[A-Z]{2}$/.test(country)) return 'Country must be a 2-letter code (e.g. RU, US).';
-		if (password.length < 8) return 'Password must be at least 8 characters.';
-		if (password !== passwordConfirm) return 'Passwords do not match.';
+	const step1Error = $derived.by(() => {
+		if (!deviceName) return $_('setup.err_device_name');
+		if (!/^[a-zA-Z0-9_-]{1,63}$/.test(deviceName)) return $_('setup.err_device_name_format');
+		if (!/^[A-Z]{2}$/.test(country)) return $_('setup.err_country');
+		if (password.length < 8) return $_('setup.err_password_short');
+		if (password !== passwordConfirm) return $_('setup.err_password_mismatch');
 		return null;
 	});
 
-	// Step 2 — pick uplink
+	// Step 2
 	let networks = $state<ScannedNetwork[]>([]);
 	let scanning = $state(false);
 	let uplinkSSID = $state('');
 	let uplinkPSK = $state('');
-	let uplinkSecured = $derived(networks.find((n) => n.ssid === uplinkSSID)?.secured ?? true);
-	let step2Error = $derived.by(() => {
-		if (!uplinkSSID) return 'Select an upstream Wi-Fi network.';
-		if (uplinkSecured && !uplinkPSK) return 'Password is required for secured networks.';
+	const uplinkSecured = $derived(networks.find((n) => n.ssid === uplinkSSID)?.secured ?? true);
+	const step2Error = $derived.by(() => {
+		if (!uplinkSSID) return $_('setup.err_uplink');
+		if (uplinkSecured && !uplinkPSK) return $_('setup.err_uplink_psk');
 		return null;
 	});
 
@@ -45,13 +45,13 @@
 		}
 	}
 
-	// Step 3 — AP
+	// Step 3
 	let apSSID = $state('KnotNet');
 	let apPSK = $state('');
-	let apBand = $state<'2.4'>('2.4'); // 5GHz unsupported on Zero 2W ap0
-	let step3Error = $derived.by(() => {
-		if (!apSSID) return 'Broadcast SSID is required.';
-		if (apPSK.length > 0 && apPSK.length < 8) return 'Wi-Fi password must be at least 8 characters (or empty for an open network).';
+	let apBand = $state<'2.4'>('2.4');
+	const step3Error = $derived.by(() => {
+		if (!apSSID) return $_('setup.err_ap_ssid');
+		if (apPSK.length > 0 && apPSK.length < 8) return $_('setup.err_ap_psk');
 		return null;
 	});
 
@@ -94,325 +94,275 @@
 	$effect(() => {
 		if (step === 2 && networks.length === 0 && !scanning) scan();
 	});
+
+	function rssiBars(dbm: number): number {
+		if (dbm >= -50) return 4;
+		if (dbm >= -65) return 3;
+		if (dbm >= -75) return 2;
+		if (dbm >= -85) return 1;
+		return 0;
+	}
+
+	const steps = [
+		{ n: 1, key: 'setup.step_device', icon: 'bi-router' },
+		{ n: 2, key: 'setup.step_uplink', icon: 'bi-cloud-arrow-up' },
+		{ n: 3, key: 'setup.step_ap', icon: 'bi-broadcast' },
+		{ n: 4, key: 'setup.step_review', icon: 'bi-check2-circle' }
+	] as const;
 </script>
 
-<div class="wizard">
-	<header>
-		<h1>Welcome to KnotOS</h1>
-		<p class="muted">Let's get your device on the network.</p>
-		<ol class="progress">
-			<li class:active={step >= 1}>Device</li>
-			<li class:active={step >= 2}>Upstream Wi-Fi</li>
-			<li class:active={step >= 3}>Broadcast Wi-Fi</li>
-			<li class:active={step >= 4}>Review</li>
-		</ol>
-	</header>
-
-	{#if step === 1}
-		<section>
-			<h2>Device &amp; admin</h2>
-
-			<label>
-				<span>Device name</span>
-				<input bind:value={deviceName} />
-				<small>Used as hostname and on the LAN as <code>{deviceName}.local</code>.</small>
-			</label>
-
-			<label>
-				<span>Country</span>
-				<input bind:value={country} maxlength="2" style="text-transform:uppercase" />
-				<small>2-letter code, e.g. RU, US, DE. Used for legal Wi-Fi channel rules.</small>
-			</label>
-
-			<label>
-				<span>Admin password</span>
-				<input type="password" bind:value={password} autocomplete="new-password" />
-			</label>
-
-			<label>
-				<span>Confirm password</span>
-				<input type="password" bind:value={passwordConfirm} autocomplete="new-password" />
-			</label>
-
-			{#if step1Error && (password || passwordConfirm)}
-				<p class="error">{step1Error}</p>
-			{/if}
-		</section>
-	{:else if step === 2}
-		<section>
-			<h2>Upstream Wi-Fi</h2>
-			<p class="muted">
-				This is the network KnotOS connects to. On a Zero 2W its channel will also be used by your
-				broadcast network.
-			</p>
-
-			<div class="scan-row">
-				<button class="ghost" onclick={scan} disabled={scanning}>
-					{scanning ? 'Scanning…' : 'Rescan'}
-				</button>
-				<small>{networks.length} networks visible</small>
+<div class="min-h-screen bg-gradient-to-br from-zinc-50 via-zinc-50 to-brand-50/30 dark:from-zinc-950 dark:via-zinc-900 dark:to-brand-950/40">
+	<div class="max-w-2xl mx-auto p-4 sm:p-8">
+		<!-- Brand -->
+		<header class="flex flex-col items-center mb-8">
+			<div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg mb-3">
+				<i class="bi bi-diagram-3-fill text-white text-2xl"></i>
 			</div>
+			<h1 class="text-2xl font-semibold">{$_('setup.title')}</h1>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{$_('setup.subtitle')}</p>
+		</header>
 
-			<ul class="networks">
-				{#each networks as n}
-					<li>
-						<label>
-							<input type="radio" bind:group={uplinkSSID} value={n.ssid} />
-							<span class="ssid">{n.ssid || '(hidden)'}</span>
-							<span class="meta">
-								{n.rssi_dbm} dBm · ch {n.channel} · {n.band} GHz
-								{#if !n.secured}<em>open</em>{/if}
-							</span>
+		<!-- Stepper -->
+		<ol class="hidden sm:flex items-center justify-between gap-2 mb-6">
+			{#each steps as s, i}
+				<li class="flex-1 flex items-center gap-2 min-w-0">
+					<div class="flex items-center gap-2.5 flex-1 min-w-0">
+						<div
+							class="
+								shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium transition-colors
+								{step >= s.n
+									? 'bg-brand-600 text-white'
+									: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}
+							"
+						>
+							{#if step > s.n}
+								<i class="bi bi-check-lg text-base"></i>
+							{:else}
+								<i class="bi {s.icon} text-base"></i>
+							{/if}
+						</div>
+						<div
+							class="text-xs font-medium truncate
+							{step >= s.n ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}"
+						>
+							{$_(s.key)}
+						</div>
+					</div>
+					{#if i < steps.length - 1}
+						<div class="flex-1 h-px bg-zinc-200 dark:bg-zinc-800 mx-1"></div>
+					{/if}
+				</li>
+			{/each}
+		</ol>
+
+		<!-- Step content -->
+		<div class="surface p-6 mb-4">
+			{#if step === 1}
+				<h2 class="text-lg font-semibold mb-4">{$_('setup.device_section_title')}</h2>
+				<div class="space-y-4">
+					<div>
+						<label class="label" for="dn">{$_('setup.device_name_label')}</label>
+						<input id="dn" class="input" bind:value={deviceName} />
+						<p class="help">
+							{$_('setup.device_name_help', { values: { name: deviceName || 'knot' } })}
+						</p>
+					</div>
+					<div>
+						<label class="label" for="cc">{$_('setup.country_label')}</label>
+						<input
+							id="cc"
+							class="input uppercase"
+							maxlength="2"
+							bind:value={country}
+						/>
+						<p class="help">{$_('setup.country_help')}</p>
+					</div>
+					<div>
+						<label class="label" for="pw">{$_('setup.admin_password_label')}</label>
+						<input
+							id="pw"
+							type="password"
+							class="input"
+							bind:value={password}
+							autocomplete="new-password"
+						/>
+						<p class="help">{$_('setup.admin_password_help')}</p>
+					</div>
+					<div>
+						<label class="label" for="pwc">{$_('setup.admin_password_confirm_label')}</label>
+						<input
+							id="pwc"
+							type="password"
+							class="input"
+							bind:value={passwordConfirm}
+							autocomplete="new-password"
+						/>
+					</div>
+					{#if step1Error && (password || passwordConfirm)}
+						<p class="flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
+							<i class="bi bi-exclamation-circle"></i>
+							{step1Error}
+						</p>
+					{/if}
+				</div>
+			{:else if step === 2}
+				<div class="flex items-start justify-between gap-4 mb-4">
+					<div>
+						<h2 class="text-lg font-semibold">{$_('setup.uplink_section_title')}</h2>
+						<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+							{$_('setup.uplink_section_subtitle')}
+						</p>
+					</div>
+					<button type="button" class="btn-ghost shrink-0" onclick={scan} disabled={scanning}>
+						{#if scanning}
+							<span class="spinner"></span>
+							{$_('setup.scanning')}
+						{:else}
+							<i class="bi bi-arrow-repeat"></i>
+							{$_('setup.rescan')}
+						{/if}
+					</button>
+				</div>
+				<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+					{$_('setup.networks_visible', { values: { count: networks.length } })}
+				</p>
+
+				<ul class="surface-muted divide-y divide-zinc-200 dark:divide-zinc-700/50 max-h-72 overflow-y-auto">
+					{#each networks as n}
+						{@const bars = rssiBars(n.rssi_dbm)}
+						<li>
+							<label class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
+								<input
+									type="radio"
+									bind:group={uplinkSSID}
+									value={n.ssid}
+									class="text-brand-600 focus:ring-brand-500"
+								/>
+								<div class="flex-1 min-w-0">
+									<div class="font-medium truncate flex items-center gap-2">
+										<span>{n.ssid || $_('setup.hidden_network')}</span>
+										{#if !n.secured}
+											<span class="badge badge-warn">
+												<i class="bi bi-unlock"></i>
+												{$_('setup.open_network')}
+											</span>
+										{/if}
+									</div>
+									<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+										{n.rssi_dbm} dBm · ch {n.channel} · {n.band} GHz
+									</div>
+								</div>
+								<span class="flex items-end gap-0.5 {bars >= 3 ? 'text-emerald-500' : bars >= 2 ? 'text-amber-500' : 'text-red-500'}">
+									{#each [1, 2, 3, 4] as b}
+										<span
+											class="w-1 rounded-sm bg-current"
+											class:opacity-25={b > bars}
+											style="height: {3 + b * 2}px"
+										></span>
+									{/each}
+								</span>
+							</label>
+						</li>
+					{/each}
+				</ul>
+
+				{#if uplinkSSID && uplinkSecured}
+					<div class="mt-4">
+						<label class="label" for="upsk">
+							{$_('setup.uplink_password_label', { values: { ssid: uplinkSSID } })}
 						</label>
-					</li>
-				{/each}
-			</ul>
+						<input id="upsk" type="password" class="input" bind:value={uplinkPSK} autocomplete="off" />
+					</div>
+				{/if}
+			{:else if step === 3}
+				<h2 class="text-lg font-semibold mb-1">{$_('setup.ap_section_title')}</h2>
+				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+					{$_('setup.ap_section_subtitle')}
+				</p>
+				<div class="space-y-4">
+					<div>
+						<label class="label" for="apssid">{$_('setup.ap_ssid_label')}</label>
+						<input id="apssid" class="input" bind:value={apSSID} />
+					</div>
+					<div>
+						<label class="label" for="appsk">{$_('setup.ap_password_label')}</label>
+						<input id="appsk" type="password" class="input" bind:value={apPSK} autocomplete="off" />
+						<p class="help">{$_('setup.ap_password_help')}</p>
+					</div>
+					<div>
+						<label class="label" for="apband">{$_('setup.band_label')}</label>
+						<select id="apband" class="input" bind:value={apBand}>
+							<option value="2.4">2.4 GHz</option>
+						</select>
+						<p class="help">{$_('setup.band_help')}</p>
+					</div>
+					{#if step3Error}
+						<p class="flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
+							<i class="bi bi-exclamation-circle"></i>
+							{step3Error}
+						</p>
+					{/if}
+				</div>
+			{:else if step === 4}
+				<h2 class="text-lg font-semibold mb-4">{$_('setup.review_section_title')}</h2>
+				<dl class="surface-muted p-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_device')}</dt>
+					<dd class="font-medium">{deviceName} <span class="text-zinc-400">({country})</span></dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_uplink')}</dt>
+					<dd class="font-medium truncate">{uplinkSSID}</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_ap')}</dt>
+					<dd class="font-medium truncate">{apSSID} <span class="text-zinc-400">({apBand} GHz)</span></dd>
+				</dl>
 
-			{#if uplinkSSID && uplinkSecured}
-				<label class="psk">
-					<span>Wi-Fi password for "{uplinkSSID}"</span>
-					<input type="password" bind:value={uplinkPSK} autocomplete="off" />
-				</label>
+				<div class="mt-4 flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-300">
+					<i class="bi bi-info-circle text-base mt-0.5 shrink-0"></i>
+					<p class="text-sm">
+						{$_('setup.review_warn', {
+							values: { setup: 'KnotOS-setup-XXXX', ap: apSSID, uplink: uplinkSSID }
+						})}
+					</p>
+				</div>
+
+				{#if submitError}
+					<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+						<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+						<span>{submitError}</span>
+					</div>
+				{/if}
 			{/if}
-		</section>
-	{:else if step === 3}
-		<section>
-			<h2>Broadcast Wi-Fi</h2>
-			<p class="muted">This is the network your devices will connect to.</p>
+		</div>
 
-			<label>
-				<span>SSID</span>
-				<input bind:value={apSSID} />
-			</label>
+		<!-- Actions -->
+		<div class="flex justify-between">
+			{#if step > 1}
+				<button class="btn-ghost" onclick={back} disabled={submitting}>
+					<i class="bi bi-arrow-left"></i>
+					{$_('setup.back')}
+				</button>
+			{:else}
+				<span></span>
+			{/if}
 
-			<label>
-				<span>Password</span>
-				<input type="password" bind:value={apPSK} autocomplete="off" />
-				<small>Leave empty for an open network. Otherwise minimum 8 characters.</small>
-			</label>
-
-			<label>
-				<span>Band</span>
-				<select bind:value={apBand}>
-					<option value="2.4">2.4 GHz</option>
-				</select>
-				<small>Only 2.4 GHz is supported on Zero 2W's broadcast interface.</small>
-			</label>
-
-			{#if step3Error}<p class="error">{step3Error}</p>{/if}
-		</section>
-	{:else if step === 4}
-		<section>
-			<h2>Review</h2>
-			<dl>
-				<dt>Device</dt>
-				<dd>{deviceName} <span class="muted">({country})</span></dd>
-
-				<dt>Upstream</dt>
-				<dd>{uplinkSSID}</dd>
-
-				<dt>Broadcast</dt>
-				<dd>{apSSID} <span class="muted">({apBand} GHz)</span></dd>
-			</dl>
-
-			<p class="warn">
-				After applying, the setup network will disappear and {apSSID} will appear on the same channel
-				as the upstream. Reconnect to {apSSID}, then sign in with your admin password.
-			</p>
-
-			{#if submitError}<p class="error">{submitError}</p>{/if}
-		</section>
-	{/if}
-
-	<footer class="actions">
-		{#if step > 1}
-			<button class="ghost" onclick={back} disabled={submitting}>Back</button>
-		{:else}
-			<span></span>
-		{/if}
-
-		{#if step < 4}
-			<button
-				onclick={next}
-				disabled={(step === 1 && !!step1Error) ||
-					(step === 2 && !!step2Error) ||
-					(step === 3 && !!step3Error)}
-			>
-				Next
-			</button>
-		{:else}
-			<button class="primary" onclick={submit} disabled={submitting}>
-				{submitting ? 'Applying…' : 'Apply'}
-			</button>
-		{/if}
-	</footer>
+			{#if step < 4}
+				<button
+					class="btn-primary"
+					onclick={next}
+					disabled={(step === 1 && !!step1Error) || (step === 2 && !!step2Error) || (step === 3 && !!step3Error)}
+				>
+					{$_('setup.next')}
+					<i class="bi bi-arrow-right"></i>
+				</button>
+			{:else}
+				<button class="btn-primary" onclick={submit} disabled={submitting}>
+					{#if submitting}
+						<span class="spinner"></span>
+						{$_('setup.applying')}
+					{:else}
+						<i class="bi bi-check2"></i>
+						{$_('setup.apply')}
+					{/if}
+				</button>
+			{/if}
+		</div>
+	</div>
 </div>
-
-<style>
-	.wizard {
-		max-width: 560px;
-		margin: 1rem auto;
-	}
-	header {
-		margin-bottom: 1.5rem;
-	}
-	h1 {
-		margin: 0 0 0.25rem;
-	}
-	h2 {
-		margin: 0 0 1rem;
-	}
-	.muted {
-		color: #6b7280;
-	}
-	.progress {
-		display: flex;
-		gap: 0.5rem;
-		list-style: none;
-		padding: 0;
-		margin: 1rem 0 0;
-		font-size: 0.85rem;
-		color: #9ca3af;
-		flex-wrap: wrap;
-	}
-	.progress li {
-		padding: 0.25rem 0.5rem;
-		border-radius: 999px;
-		background: #f3f4f6;
-	}
-	.progress li.active {
-		color: #1f2937;
-		background: #dbeafe;
-	}
-	section {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		padding: 1.25rem;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
-		background: #f9fafb;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-	label > span {
-		font-weight: 500;
-	}
-	input,
-	select {
-		padding: 0.5rem 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 6px;
-		font-size: 1rem;
-		background: white;
-	}
-	small {
-		color: #6b7280;
-	}
-	.scan-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.networks {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		max-height: 280px;
-		overflow-y: auto;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
-		background: white;
-	}
-	.networks li + li {
-		border-top: 1px solid #f3f4f6;
-	}
-	.networks label {
-		flex-direction: row;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.5rem 0.75rem;
-		cursor: pointer;
-	}
-	.networks label:hover {
-		background: #f9fafb;
-	}
-	.ssid {
-		flex: 1;
-		font-weight: 500;
-	}
-	.meta {
-		color: #6b7280;
-		font-size: 0.85rem;
-	}
-	em {
-		font-style: normal;
-		margin-left: 0.5rem;
-		color: #b45309;
-	}
-	.psk {
-		margin-top: 0.5rem;
-	}
-	.actions {
-		display: flex;
-		justify-content: space-between;
-		margin-top: 1.25rem;
-	}
-	dl {
-		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: 0.5rem 1rem;
-		margin: 0;
-	}
-	dt {
-		color: #6b7280;
-	}
-	dd {
-		margin: 0;
-	}
-	button {
-		padding: 0.5rem 1rem;
-		border-radius: 6px;
-		border: 1px solid transparent;
-		font-size: 1rem;
-		font-weight: 500;
-		cursor: pointer;
-		background: #2563eb;
-		color: white;
-	}
-	button:not(:disabled):hover {
-		background: #1d4ed8;
-	}
-	button.primary {
-		background: #059669;
-	}
-	button.primary:not(:disabled):hover {
-		background: #047857;
-	}
-	button.ghost {
-		background: white;
-		color: #1f2937;
-		border-color: #d1d5db;
-	}
-	button.ghost:not(:disabled):hover {
-		background: #f9fafb;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.error {
-		color: #b91c1c;
-		margin: 0;
-	}
-	.warn {
-		padding: 0.75rem 1rem;
-		background: #fef3c7;
-		color: #78350f;
-		border-radius: 6px;
-		margin: 0;
-	}
-</style>

@@ -3,13 +3,22 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { apiGet, apiPost, ApiError } from '$lib/api';
-	import type { SystemStatus } from '$lib/types';
+	import { _, isLoading, waitLocale } from 'svelte-i18n';
+	import { initI18n } from '$lib/i18n';
+	import { apiGet, ApiError } from '$lib/api';
+	import type { SystemStatus, Plugin, PluginsResponse } from '$lib/types';
+	import Sidebar from '$lib/components/Sidebar.svelte';
+	import Topbar from '$lib/components/Topbar.svelte';
+
+	initI18n();
 
 	let { children } = $props();
 
 	let status = $state<SystemStatus | null>(null);
+	let plugins = $state<Plugin[]>([]);
 	let bootError = $state<string | null>(null);
+	let i18nReady = $state(false);
+	let sidebarOpen = $state(false);
 
 	async function loadStatus() {
 		try {
@@ -19,118 +28,81 @@
 		}
 	}
 
-	// Route the user to the correct screen on every status change.
+	async function loadPlugins() {
+		try {
+			const r = await apiGet<PluginsResponse>('/plugins');
+			plugins = r.plugins;
+		} catch {
+			// 401 expected on /login & /setup; ignore — sidebar just won't show plugin items.
+			plugins = [];
+		}
+	}
+
+	const isSetup = $derived(status?.role === 'setup');
+	const isLoginRoute = $derived($page.url.pathname.startsWith('/login'));
+	const isSetupRoute = $derived($page.url.pathname.startsWith('/setup'));
+	const isAuthRoute = $derived(isLoginRoute || isSetupRoute);
+
+	// Route guard:
+	//  - role=setup  → push everyone into /setup
+	//  - role=*      → /login if unauth (handled by 401 redirects in pages)
 	$effect(() => {
 		if (!status) return;
 		const path = $page.url.pathname;
-
-		if (status.role === 'setup') {
-			if (!path.startsWith('/setup')) goto('/setup', { replaceState: true });
-			return;
-		}
-
-		// role !== 'setup' — needs auth.
-		if (path.startsWith('/setup')) {
+		if (status.role === 'setup' && !path.startsWith('/setup')) {
+			goto('/setup', { replaceState: true });
+		} else if (status.role !== 'setup' && path.startsWith('/setup')) {
 			goto('/', { replaceState: true });
-			return;
 		}
 	});
 
-	async function logout() {
-		try {
-			await apiPost('/auth/logout');
-		} catch {
-			// ignore — we're going to the login screen anyway
+	// Refresh plugins when the layout-level pages change (login -> /).
+	$effect(() => {
+		const path = $page.url.pathname;
+		if (path !== '/login' && path !== '/setup') {
+			loadPlugins();
 		}
-		goto('/login', { replaceState: true });
-	}
+	});
 
-	onMount(loadStatus);
-
-	const showHeader = $derived(status?.role === 'wifi-extender');
+	onMount(async () => {
+		await waitLocale();
+		i18nReady = true;
+		await loadStatus();
+	});
 </script>
 
-<div class="app">
-	{#if showHeader}
-		<header>
-			<a href="/" class="brand">KnotOS</a>
-			<nav>
-				<a href="/" class="link">Dashboard</a>
-				<a href="/plugins" class="link">Plugins</a>
-				<button class="link" onclick={logout}>Logout</button>
-			</nav>
-		</header>
-	{/if}
+<svelte:head>
+	<title>KnotOS</title>
+</svelte:head>
 
-	<main>
-		{#if bootError}
-			<div class="error">
-				Could not reach knotd: <code>{bootError}</code>
+{#if !i18nReady || $isLoading}
+	<!-- Brief flash before i18n loads. Keep it minimal so it doesn't strobe. -->
+	<div class="min-h-screen flex items-center justify-center text-zinc-400">
+		<div class="spinner"></div>
+	</div>
+{:else if bootError}
+	<div class="min-h-screen flex items-center justify-center p-6">
+		<div class="surface max-w-md w-full p-6 text-center">
+			<div class="w-12 h-12 mx-auto rounded-full bg-red-100 dark:bg-red-500/15 flex items-center justify-center mb-3">
+				<i class="bi bi-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
 			</div>
-		{:else}
-			{@render children()}
-		{/if}
-	</main>
-
-	<footer>
-		<small>KnotOS v0.0.0-dev — pre-alpha</small>
-	</footer>
-</div>
-
-<style>
-	.app {
-		display: flex;
-		flex-direction: column;
-		min-height: 100vh;
-		font-family: system-ui, -apple-system, sans-serif;
-	}
-	header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 1rem 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
-	}
-	.brand {
-		font-weight: 700;
-		font-size: 1.25rem;
-		text-decoration: none;
-		color: inherit;
-	}
-	nav {
-		display: flex;
-		gap: 1rem;
-	}
-	.link {
-		background: none;
-		border: none;
-		color: #2563eb;
-		cursor: pointer;
-		font: inherit;
-		padding: 0;
-	}
-	.link:hover {
-		color: #1d4ed8;
-		text-decoration: underline;
-	}
-	main {
-		flex: 1;
-		padding: 2rem 1.5rem;
-		max-width: 720px;
-		width: 100%;
-		margin: 0 auto;
-	}
-	footer {
-		padding: 1rem 1.5rem;
-		border-top: 1px solid #e5e7eb;
-		color: #6b7280;
-		text-align: center;
-	}
-	.error {
-		padding: 1rem;
-		border: 1px solid #fca5a5;
-		background: #fef2f2;
-		border-radius: 8px;
-		color: #991b1b;
-	}
-</style>
+			<h1 class="font-semibold mb-1">{$_('dashboard.error')}</h1>
+			<p class="text-sm text-zinc-500 font-mono break-all">{bootError}</p>
+		</div>
+	</div>
+{:else if isAuthRoute}
+	<!-- Login & setup pages: full-bleed, no sidebar / topbar. -->
+	{@render children()}
+{:else}
+	<div class="min-h-screen flex">
+		<Sidebar {plugins} bind:open={sidebarOpen} />
+		<div class="flex-1 flex flex-col min-w-0">
+			<Topbar onMenuClick={() => (sidebarOpen = true)} />
+			<main class="flex-1 p-4 lg:p-8">
+				<div class="max-w-5xl mx-auto w-full">
+					{@render children()}
+				</div>
+			</main>
+		</div>
+	</div>
+{/if}

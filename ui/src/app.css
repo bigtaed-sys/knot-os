@@ -1,28 +1,153 @@
-*,
-*::before,
-*::after {
-	box-sizing: border-box;
+@import 'bootstrap-icons/font/bootstrap-icons.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	html {
+		font-family: theme(fontFamily.sans);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	body {
+		@apply bg-zinc-50 text-zinc-900;
+	}
+
+	html.dark body {
+		@apply bg-zinc-950 text-zinc-100;
+	}
 }
 
-html,
-body {
-	margin: 0;
-	padding: 0;
-	background: #ffffff;
-	color: #111827;
+@layer components {
+	/* Surface card - the main container for content blocks */
+	.surface {
+		@apply bg-white border border-zinc-200/80 rounded-xl shadow-sm;
+	}
+	.dark .surface {
+		@apply bg-zinc-900 border-zinc-800;
+	}
+
+	/* Subtle surface, e.g. for nested cards or muted info */
+	.surface-muted {
+		@apply bg-zinc-50 border border-zinc-200/60 rounded-lg;
+	}
+	.dark .surface-muted {
+		@apply bg-zinc-800/50 border-zinc-700/50;
+	}
+
+	/* Primary button */
+	.btn-primary {
+		@apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+		       bg-brand-600 text-white shadow-sm
+		       hover:bg-brand-700 active:bg-brand-800
+		       focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
+		       disabled:opacity-50 disabled:cursor-not-allowed
+		       transition-colors;
+	}
+	.dark .btn-primary {
+		@apply focus:ring-offset-zinc-900;
+	}
+
+	/* Ghost / secondary button */
+	.btn-ghost {
+		@apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+		       bg-white text-zinc-700 border border-zinc-200 shadow-sm
+		       hover:bg-zinc-50 hover:text-zinc-900
+		       focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
+		       disabled:opacity-50 disabled:cursor-not-allowed
+		       transition-colors;
+	}
+	.dark .btn-ghost {
+		@apply bg-zinc-900 text-zinc-300 border-zinc-700
+		       hover:bg-zinc-800 hover:text-zinc-100
+		       focus:ring-offset-zinc-900;
+	}
+
+	/* Danger button */
+	.btn-danger {
+		@apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+		       bg-red-600 text-white shadow-sm
+		       hover:bg-red-700 active:bg-red-800
+		       focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
+		       disabled:opacity-50 disabled:cursor-not-allowed
+		       transition-colors;
+	}
+	.dark .btn-danger {
+		@apply focus:ring-offset-zinc-900;
+	}
+
+	/* Text input */
+	.input {
+		@apply block w-full px-3 py-2 rounded-lg
+		       bg-white border border-zinc-300 text-zinc-900 placeholder-zinc-400
+		       focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none
+		       disabled:opacity-50 disabled:bg-zinc-50
+		       transition-colors;
+	}
+	.dark .input {
+		@apply bg-zinc-900 border-zinc-700 text-zinc-100 placeholder-zinc-500;
+	}
+
+	.label {
+		@apply block text-sm font-medium text-zinc-700 mb-1.5;
+	}
+	.dark .label {
+		@apply text-zinc-300;
+	}
+
+	.help {
+		@apply mt-1 text-xs text-zinc-500;
+	}
+	.dark .help {
+		@apply text-zinc-400;
+	}
+
+	/* Pill-style status badge */
+	.badge {
+		@apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+	}
+	.badge-ok       { @apply bg-emerald-100 text-emerald-700; }
+	.badge-warn     { @apply bg-amber-100 text-amber-700; }
+	.badge-bad      { @apply bg-red-100 text-red-700; }
+	.badge-info     { @apply bg-brand-100 text-brand-700; }
+	.badge-neutral  { @apply bg-zinc-100 text-zinc-700; }
+	.dark .badge-ok      { @apply bg-emerald-500/15 text-emerald-300; }
+	.dark .badge-warn    { @apply bg-amber-500/15 text-amber-300; }
+	.dark .badge-bad     { @apply bg-red-500/15 text-red-300; }
+	.dark .badge-info    { @apply bg-brand-500/15 text-brand-300; }
+	.dark .badge-neutral { @apply bg-zinc-700/50 text-zinc-300; }
+
+	/* Sidebar nav item */
+	.nav-item {
+		@apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+		       text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100
+		       transition-colors;
+	}
+	.nav-item.active {
+		@apply bg-brand-50 text-brand-700;
+	}
+	.dark .nav-item {
+		@apply text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800;
+	}
+	.dark .nav-item.active {
+		@apply bg-brand-500/10 text-brand-300;
+	}
+
+	/* Spinner for loading states */
+	.spinner {
+		@apply inline-block w-4 h-4 border-2 border-current border-r-transparent rounded-full animate-spin;
+	}
 }
 
-a {
-	color: #2563eb;
-}
-
-a:hover {
-	color: #1d4ed8;
-}
-
-code {
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	background: #f3f4f6;
-	padding: 0.1em 0.3em;
-	border-radius: 4px;
+@layer utilities {
+	/* Pulsing dot used for "live status" indicators */
+	.dot-live {
+		@apply relative inline-block w-2 h-2 rounded-full bg-emerald-500;
+	}
+	.dot-live::after {
+		content: '';
+		@apply absolute inset-0 rounded-full bg-emerald-500/60 animate-ping;
+	}
 }

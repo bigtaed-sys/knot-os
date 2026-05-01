@@ -43,12 +43,26 @@ export interface ScanResponse {
 	networks: ScannedNetwork[];
 }
 
+/** Sidebar menu item declared by a plugin manifest. */
+export interface PluginMenuItem {
+	/** SPA route to navigate to (must start with `/`). */
+	path: string;
+	/** Visible label shown in the sidebar. */
+	label: string;
+	/** Bootstrap-icons class name (e.g. `bi-stars`). Optional. */
+	icon?: string;
+	/** Sort order within the plugins section (lower = earlier). */
+	order?: number;
+}
+
 export interface Plugin {
 	id: string;
 	name: string;
 	version: string;
 	description?: string;
 	enabled: boolean;
+	/** Sidebar menu items contributed by this plugin (read from manifest). */
+	menu?: PluginMenuItem[];
 }
 
 export interface PluginsResponse {
