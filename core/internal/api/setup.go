@@ -123,6 +123,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.cfg = finished
 	s.mu.Unlock()
+	s.fireConfigApplied(finished)
 
 	// Issue a session immediately — the user is implicitly logged in
 	// with the password they just set. They won't be redirected to a

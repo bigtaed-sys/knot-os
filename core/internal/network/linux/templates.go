@@ -109,8 +109,14 @@ type DnsmasqParams struct {
 	// connects.
 	CaptivePortal bool
 	// Forwarders is the list of upstream DNS servers (used in
-	// wifi-extender role). Ignored when CaptivePortal is set.
+	// wifi-extender role when DNS is left in dnsmasq's hands).
+	// Ignored when CaptivePortal or DisableDNS is set.
 	Forwarders []string
+	// DisableDNS turns dnsmasq's DNS listener off entirely (port=0)
+	// so knotd's own DNS resolver can bind port 53 on the gateway
+	// IP. dnsmasq stays running for DHCP. Used in wifi-extender role
+	// once the M11c resolver takes over.
+	DisableDNS bool
 }
 
 // BuildDnsmasqConf returns dnsmasq.conf for the given parameters.
@@ -125,6 +131,13 @@ func BuildDnsmasqConf(p DnsmasqParams) string {
 	fmt.Fprintf(&b, "dhcp-range=%s,%s,12h\n", p.DHCPPoolStart, p.DHCPPoolEnd)
 	fmt.Fprintf(&b, "dhcp-option=option:router,%s\n", p.ListenIP)
 	fmt.Fprintf(&b, "dhcp-option=option:dns-server,%s\n", p.ListenIP)
+
+	if p.DisableDNS {
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "# DNS handled by knotd's own resolver — turn off dnsmasq's port 53.")
+		fmt.Fprintln(&b, "port=0")
+		return b.String()
+	}
 
 	if p.CaptivePortal {
 		fmt.Fprintln(&b)

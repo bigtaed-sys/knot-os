@@ -111,7 +111,10 @@ func (b *LinuxBackend) applyExtender(ctx context.Context, cfg config.Config) err
 		ListenIP:      gw,
 		DHCPPoolStart: lan.DHCP.PoolStart,
 		DHCPPoolEnd:   lan.DHCP.PoolEnd,
-		Forwarders:    []string{"1.1.1.1", "8.8.8.8"},
+		// DisableDNS=true — knotd's own resolver takes port 53 on
+		// the gateway IP. dnsmasq keeps DHCP duties only.
+		// Resolver lifecycle is in main.go (see SetOnRoleChange).
+		DisableDNS: true,
 	})
 	if err := writeRuntimeFile(DnsmasqConfPath, dnsmasqConf); err != nil {
 		return err

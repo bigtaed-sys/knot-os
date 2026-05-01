@@ -34,15 +34,16 @@ var ErrConfigNotInitialized = errors.New("api: config not initialized")
 // Server holds API state and produces an http.Handler. The zero value is
 // not usable; construct via New.
 type Server struct {
-	configPath    string
-	version       string
-	backend       network.Backend
-	sessions      *auth.Sessions
-	plugins       *plugin.Registry
-	devices       *deviceregistry.Registry
-	profiles      *profile.Registry
-	kickScheduler func()
-	production    bool
+	configPath      string
+	version         string
+	backend         network.Backend
+	sessions        *auth.Sessions
+	plugins         *plugin.Registry
+	devices         *deviceregistry.Registry
+	profiles        *profile.Registry
+	kickScheduler   func()
+	onConfigApplied func(config.Config)
+	production      bool
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -70,6 +71,21 @@ func New(opts Options) *Server {
 		sessions:   opts.Sessions,
 		plugins:    opts.Plugins,
 		cfg:        opts.Initial,
+	}
+}
+
+// SetOnConfigApplied registers a callback that fires after every
+// successful config application — PUT /api/config and POST
+// /api/setup/complete both call it. Used by main.go to react to
+// role changes (e.g. start/stop the DNS resolver when entering or
+// leaving wifi-extender mode).
+func (s *Server) SetOnConfigApplied(fn func(config.Config)) {
+	s.onConfigApplied = fn
+}
+
+func (s *Server) fireConfigApplied(cfg config.Config) {
+	if s.onConfigApplied != nil {
+		s.onConfigApplied(cfg)
 	}
 }
 
@@ -231,6 +247,7 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.cfg = incoming
 	s.mu.Unlock()
+	s.fireConfigApplied(incoming)
 	writeJSON(w, http.StatusOK, incoming)
 }
 

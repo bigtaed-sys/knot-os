@@ -80,10 +80,18 @@ type Options struct {
 
 // Server is the running DNS resolver. Construct with New and start
 // with Run; one goroutine per protocol (UDP+TCP) is launched.
+//
+// The listen address is mutable via SetListen — useful when the role
+// flips between setup (dnsmasq still owns 53 for the captive portal)
+// and wifi-extender (knotd takes 53 over). SetListen restarts the
+// internal listeners idempotently.
 type Server struct {
 	opts Options
-	udp  *mdns.Server
-	tcp  *mdns.Server
+
+	mu     sync.Mutex
+	listen string
+	udp    *mdns.Server
+	tcp    *mdns.Server
 }
 
 // New constructs a Server (does not start listening).
@@ -100,56 +108,118 @@ func New(opts Options) *Server {
 	if opts.Log == nil {
 		opts.Log = nopLog{}
 	}
-	return &Server{opts: opts}
+	return &Server{opts: opts, listen: opts.Listen}
 }
 
-// Run starts the listeners and blocks until ctx is cancelled. Both
-// UDP and TCP are bound — DNS clients fall back to TCP for large
-// responses.
+// Run blocks until ctx is cancelled, keeping the listeners (if any)
+// alive. The server starts immediately if Options.Listen is set;
+// otherwise it idles until SetListen is called.
 func (s *Server) Run(ctx context.Context) error {
-	if s.opts.Listen == "" {
-		s.opts.Logger.Printf("dns: listen address empty, resolver disabled")
-		<-ctx.Done()
-		return nil
-	}
 	if s.opts.Blocklists == nil {
 		return fmt.Errorf("dns.Server: Blocklists registry is required")
 	}
-
-	handler := mdns.HandlerFunc(s.handle)
-	s.udp = &mdns.Server{Addr: s.opts.Listen, Net: "udp", Handler: handler}
-	s.tcp = &mdns.Server{Addr: s.opts.Listen, Net: "tcp", Handler: handler}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	errCh := make(chan error, 2)
-	go func() {
-		defer wg.Done()
-		if err := s.udp.ListenAndServe(); err != nil {
-			errCh <- fmt.Errorf("udp: %w", err)
+	if s.listen != "" {
+		if err := s.startLocked(); err != nil {
+			s.opts.Logger.Printf("dns: initial listen on %s failed: %v", s.listen, err)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		if err := s.tcp.ListenAndServe(); err != nil {
-			errCh <- fmt.Errorf("tcp: %w", err)
-		}
-	}()
-
-	s.opts.Logger.Printf("dns: listening on %s (udp+tcp), upstreams=%s",
-		s.opts.Listen, strings.Join(s.opts.Upstreams, ","))
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = s.udp.ShutdownContext(shutdownCtx)
-		_ = s.tcp.ShutdownContext(shutdownCtx)
-		wg.Wait()
-		return nil
-	case err := <-errCh:
-		return err
 	}
+	<-ctx.Done()
+	s.stopLocked()
+	return nil
+}
+
+// SetListen swaps the listen address. Empty stops the resolver.
+// Calling with the same address as currently active is a no-op.
+func (s *Server) SetListen(addr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if addr == s.listen && (addr == "" || s.udp != nil) {
+		return
+	}
+	s.listen = addr
+	s.stopRunningLocked()
+	if addr == "" {
+		s.opts.Logger.Printf("dns: resolver stopped (no listen address)")
+		return
+	}
+	if err := s.startLocked(); err != nil {
+		s.opts.Logger.Printf("dns: listen on %s failed: %v", addr, err)
+	}
+}
+
+// startLocked spawns UDP+TCP listeners. Caller must hold s.mu OR be
+// the constructor's startup path (where no other goroutines see s yet).
+func (s *Server) startLocked() error {
+	addr := s.listen
+	if addr == "" {
+		return nil
+	}
+	handler := mdns.HandlerFunc(s.handle)
+	udp := &mdns.Server{Addr: addr, Net: "udp", Handler: handler}
+	tcp := &mdns.Server{Addr: addr, Net: "tcp", Handler: handler}
+
+	udpReady := make(chan error, 1)
+	tcpReady := make(chan error, 1)
+	udp.NotifyStartedFunc = func() { udpReady <- nil }
+	tcp.NotifyStartedFunc = func() { tcpReady <- nil }
+
+	go func() {
+		if err := udp.ListenAndServe(); err != nil {
+			s.opts.Logger.Printf("dns: udp listener exited: %v", err)
+		}
+	}()
+	go func() {
+		if err := tcp.ListenAndServe(); err != nil {
+			s.opts.Logger.Printf("dns: tcp listener exited: %v", err)
+		}
+	}()
+
+	// Wait briefly for both to come up so SetListen returns after the
+	// listener is actually accepting traffic.
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	select {
+	case <-udpReady:
+	case <-timeout.C:
+		_ = udp.Shutdown()
+		return fmt.Errorf("udp listener did not start within 2s")
+	}
+	timeout.Reset(2 * time.Second)
+	select {
+	case <-tcpReady:
+	case <-timeout.C:
+		_ = udp.Shutdown()
+		_ = tcp.Shutdown()
+		return fmt.Errorf("tcp listener did not start within 2s")
+	}
+
+	s.udp = udp
+	s.tcp = tcp
+	s.opts.Logger.Printf("dns: listening on %s (udp+tcp), upstreams=%s",
+		addr, strings.Join(s.opts.Upstreams, ","))
+	return nil
+}
+
+func (s *Server) stopRunningLocked() {
+	if s.udp == nil && s.tcp == nil {
+		return
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if s.udp != nil {
+		_ = s.udp.ShutdownContext(shutdownCtx)
+	}
+	if s.tcp != nil {
+		_ = s.tcp.ShutdownContext(shutdownCtx)
+	}
+	s.udp = nil
+	s.tcp = nil
+}
+
+func (s *Server) stopLocked() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopRunningLocked()
 }
 
 // handle is the per-request hot path. It checks the blocklist, then

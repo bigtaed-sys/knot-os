@@ -64,6 +64,50 @@ type dnsDeviceLookup struct {
 	profiles *profile.Registry
 }
 
+// dnsListenForRole derives the address knotd's DNS resolver should
+// bind to given the current config. Returns "" when no listener
+// should be active.
+//
+//	role=setup           → "" (dnsmasq holds 53 for the captive portal)
+//	role=wifi-extender   → "<gateway>:53"
+//	dev mode             → "" (no port 53 binding on a developer's box)
+func dnsListenForRole(cfg config.Config, devMode bool) string {
+	if devMode {
+		return ""
+	}
+	if cfg.Role != config.RoleWiFiExtender {
+		return ""
+	}
+	lan := cfg.Network.LAN
+	if lan == nil {
+		return ""
+	}
+	gw := firstUsableIPv4(lan.CIDR)
+	if gw == "" {
+		return ""
+	}
+	return gw + ":53"
+}
+
+// firstUsableIPv4 mirrors the helper in network/linux/apply_setup.go.
+// Kept inlined to avoid a dependency cycle (core/internal/network/linux
+// is build-tagged for linux-only and main.go must compile on Windows
+// for dev too).
+func firstUsableIPv4(cidr string) string {
+	_, ipnet, err := net.ParseCIDR(cidr)
+	if err != nil || ipnet == nil {
+		return ""
+	}
+	ip := ipnet.IP.To4()
+	if ip == nil {
+		return ""
+	}
+	gw := make(net.IP, 4)
+	copy(gw, ip)
+	gw[3]++
+	return gw.String()
+}
+
 func (d dnsDeviceLookup) BlocklistsForIP(ip net.IP) (string, []string, bool) {
 	if ip == nil {
 		return "", nil, false
@@ -224,11 +268,21 @@ func main() {
 	})
 	go dnsDownloader.Run(ctx)
 
-	// dnsLookup bridges the device + profile registries into the DNS
-	// server's per-IP filter. Built now so M11c can hand it to the
-	// resolver when the LinuxBackend starts/stops the listener.
-	dnsLookup := dnsDeviceLookup{devices: devices, profiles: profiles}
-	_ = dnsLookup // suppressed until M11c wires the resolver
+	// DNS resolver: started always, but the listen address is
+	// derived from the current role (empty in setup mode where
+	// dnsmasq's own DNS catch-all owns port 53; gateway:53 in
+	// wifi-extender mode where dnsmasq is configured port=0).
+	dnsServer := knotdns.New(knotdns.Options{
+		Listen:     dnsListenForRole(cfg, *dev),
+		Blocklists: dnsBlocklists,
+		Devices:    dnsDeviceLookup{devices: devices, profiles: profiles},
+		Logger:     logger,
+	})
+	go func() {
+		if err := dnsServer.Run(ctx); err != nil {
+			logger.Printf("dns server: %v", err)
+		}
+	}()
 
 	plugins := plugin.NewRegistry(*pluginsDir)
 	if err := plugins.Discover(); err != nil {
@@ -259,6 +313,19 @@ func main() {
 	// after a device's profile or a profile's schedule changes.
 	apiSrv.SetSchedulerKick(func() {
 		go sched.RunOnce()
+	})
+	// On every config-apply (PUT /api/config or setup wizard
+	// completion), update the DNS resolver's listen address to
+	// match the new role. Goes through SetListen which is
+	// idempotent for unchanged addresses.
+	apiSrv.SetOnConfigApplied(func(applied config.Config) {
+		dnsServer.SetListen(dnsListenForRole(applied, *dev))
+		// Trigger an immediate refresh of cached blocklists when
+		// transitioning into wifi-extender so the device gets ad-block
+		// from the first query.
+		if applied.Role == config.RoleWiFiExtender {
+			dnsDownloader.RefreshNow()
+		}
 	})
 	// Production mode unlocks the system endpoints (reboot/shutdown/
 	// update) that would be destructive in dev. Tied to the absence
