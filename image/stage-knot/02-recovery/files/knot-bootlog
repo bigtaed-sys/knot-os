@@ -1,0 +1,85 @@
+#!/bin/bash
+# Capture boot diagnostics to /boot/firmware/knot-startup.log so the user
+# can read them by popping the SD into a computer — handy when knotd
+# fails to bring the Wi-Fi up and there is no other way in (no serial,
+# no network).
+#
+# Runs from a oneshot systemd unit shortly after multi-user.target.
+
+set +e
+
+LOG=/boot/firmware/knot-startup.log
+exec > "$LOG" 2>&1
+
+echo "==================== KnotOS startup diagnostics ===================="
+echo "When:      $(date -u +'%Y-%m-%d %H:%M:%SZ')"
+echo "Hostname:  $(hostname 2>/dev/null)"
+echo "Kernel:    $(uname -a)"
+echo "Uptime:    $(uptime)"
+
+section() {
+    echo
+    echo "----- $1 -----"
+}
+
+section "systemctl is-active knotd"
+systemctl is-active knotd
+
+section "systemctl status knotd"
+systemctl status knotd --no-pager -l
+
+section "journalctl -u knotd -b"
+journalctl -u knotd -b --no-pager
+
+section "journalctl -u hostapd -b"
+journalctl -u hostapd -b --no-pager
+
+section "journalctl -u dnsmasq -b"
+journalctl -u dnsmasq -b --no-pager
+
+section "journalctl -u wpa_supplicant -b"
+journalctl -u wpa_supplicant -b --no-pager
+
+section "ip -br link"
+ip -br link
+
+section "ip -br addr"
+ip -br addr
+
+section "iw dev"
+iw dev
+
+section "iw reg get"
+iw reg get
+
+section "rfkill list"
+rfkill list
+
+section "lsmod | grep -E 'brcm|cfg80211|mac80211'"
+lsmod | grep -E 'brcm|cfg80211|mac80211'
+
+section "ls /etc/knot/"
+ls -la /etc/knot/ 2>/dev/null
+
+section "cat /etc/knot/config.yaml"
+cat /etc/knot/config.yaml 2>/dev/null
+
+section "ls /run/knot/"
+ls -la /run/knot/ 2>/dev/null
+
+section "cat /run/knot/hostapd.conf (if present)"
+cat /run/knot/hostapd.conf 2>/dev/null
+
+section "cat /run/knot/dnsmasq.conf (if present)"
+cat /run/knot/dnsmasq.conf 2>/dev/null
+
+section "dmesg (last 80 lines, brcm/wifi/firmware filtered)"
+dmesg | grep -iE 'brcm|wifi|wlan|firmware|cfg80211|hostapd|nl80211' | tail -80
+
+section "dmesg (last 30 lines, anything)"
+dmesg | tail -30
+
+echo
+echo "==================== end ===================="
+
+chmod 644 "$LOG" 2>/dev/null

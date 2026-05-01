@@ -1,0 +1,15 @@
+[Unit]
+Description=Write KnotOS startup diagnostics to /boot/firmware
+# Run after knotd has had a chance to come up (or fail). Don't block
+# anything; we are a debug aid, not a critical service.
+After=knotd.service multi-user.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/knot-bootlog
+TimeoutStartSec=60
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

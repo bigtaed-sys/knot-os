@@ -194,6 +194,13 @@ install -m 644 -D "$FILES_DIR/knotd.service"       "$MOUNT_DIR/etc/systemd/syste
 install -m 600 -D "$FILES_DIR/default-config.yaml" "$MOUNT_DIR/etc/knot/config.yaml"
 chmod 700 "$MOUNT_DIR/etc/knot"
 
+# Recovery: write diagnostics to /boot/firmware/knot-startup.log on
+# every boot. The user can read this from Windows Explorer (FAT
+# partition) when there is no working network/serial.
+RECOVERY_DIR="$STAGE_DIR/02-recovery/files"
+install -m 755 -D "$RECOVERY_DIR/knot-bootlog"         "$MOUNT_DIR/usr/local/bin/knot-bootlog"
+install -m 644 -D "$RECOVERY_DIR/knot-bootlog.service" "$MOUNT_DIR/etc/systemd/system/knot-bootlog.service"
+
 echo "    copying plugins"
 mkdir -p "$MOUNT_DIR/usr/lib/knot/plugins"
 shopt -s nullglob
@@ -228,6 +235,7 @@ run_in_chroot "
     systemctl disable dhcpcd.service                2>/dev/null || true
     systemctl mask dhcpcd.service                   2>/dev/null || true
     systemctl enable knotd.service
+    systemctl enable knot-bootlog.service
     systemctl enable ssh.service
 "
 
