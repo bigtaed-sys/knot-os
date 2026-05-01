@@ -113,11 +113,22 @@ Skip the OS-customization dialog (knotd handles its own onboarding).
 4. Walk through the wizard: device name, admin password, upstream Wi-Fi, broadcast Wi-Fi.
 5. After "Apply", the setup network disappears and your chosen broadcast SSID comes up. Reconnect to it and find the dashboard at `http://<device-name>.local`.
 
-### Recovery / SSH access
+### Recovery
 
-The image ships with SSH enabled and a fallback user `knot` / password `knot`. Change this immediately on a real deployment.
+The image ships with three independent recovery channels:
 
-If the Wi-Fi setup ever leaves you locked out, plug a USB Ethernet adapter into the Pi (planned for v0.2; for v0.1 the only out-of-band path is removing the SD card and editing `/etc/knot/config.yaml` directly).
+1. **Boot-time diagnostic log.** On every boot, `knotd-bootlog.service` writes `systemctl status`, `journalctl`, `iw`, `rfkill`, and recent `dmesg` output to `/boot/firmware/knot-startup.log`. Pop the SD into your computer; Windows mounts the boot partition automatically and you can open the file in any text editor.
+
+2. **Serial console.** Enabled on UART0 at 115200 8N1. Connect a **3.3V** USB-TTL adapter to GPIO:
+   - Pin 6 (GND) ↔ USB-TTL GND
+   - Pin 8 (TXD) ↔ USB-TTL RX
+   - Pin 10 (RXD) ↔ USB-TTL TX
+
+   **Do not use a 5V adapter — it will damage the Pi.** Open `/dev/ttyUSB0` (Linux) or the COMx port (Windows) at 115200 8N1, no flow control. Login: `knot` / `knot`. The same pinout is mirrored to `/boot/firmware/SERIAL-CONSOLE.txt` for offline reference.
+
+3. **SSH** is enabled by default and listens on whatever IP knotd assigns once the Wi-Fi extender role is up. Default credentials `knot` / `knot` — change immediately on a real deployment.
+
+For v0.1, USB-Ethernet WAN is not supported. Recovery in extreme cases (corrupted config, broken extender role) involves popping the SD into a computer and editing `/etc/knot/config.yaml` directly.
 
 ## Pinning the base image
 

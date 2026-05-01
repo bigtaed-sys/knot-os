@@ -244,6 +244,60 @@ run_in_chroot "
 # username:password so the wizard does not block on it.
 echo 'knot:$(openssl passwd -6 knot)' > "$MOUNT_DIR/boot/firmware/userconf.txt"
 
+# Enable serial console on UART0 (PL011). Standard recovery path
+# when the Wi-Fi setup fails — connect a 3.3V USB-TTL adapter to
+# GPIO pins 6 (GND), 8 (TXD), 10 (RXD) and open at 115200 8N1.
+#
+# On Zero 2W, UART0 is wired to the Bluetooth chip by default;
+# disable-bt frees it for the console. KnotOS doesn't use BT.
+CONFIG_TXT="$MOUNT_DIR/boot/firmware/config.txt"
+if ! grep -q '^enable_uart=1' "$CONFIG_TXT" 2>/dev/null; then
+    {
+        echo
+        echo "# KnotOS: enable serial console on GPIO 14/15 (UART0)"
+        echo "enable_uart=1"
+        echo "dtoverlay=disable-bt"
+    } >> "$CONFIG_TXT"
+fi
+
+CMDLINE_TXT="$MOUNT_DIR/boot/firmware/cmdline.txt"
+if ! grep -q 'console=serial0' "$CMDLINE_TXT" 2>/dev/null; then
+    # cmdline.txt must be a single line; add console= at the front so
+    # systemd registers serial0 as a console without trampling tty1.
+    sed -i '1s/^/console=serial0,115200 /' "$CMDLINE_TXT"
+fi
+
+# A README on the FAT partition so the user can find the pinout from
+# Windows without booting the Pi.
+cat > "$MOUNT_DIR/boot/firmware/SERIAL-CONSOLE.txt" <<'EOF'
+KnotOS — Serial console
+=======================
+
+Settings: 115200 baud, 8 data bits, no parity, 1 stop bit, no flow control.
+
+Pi Zero 2W GPIO pinout (looking at the board, pin 1 marked with a small
+square; physical pins, not BCM):
+
+    Pin  6  GND     <-> USB-TTL GND
+    Pin  8  TXD     <-> USB-TTL RX
+    Pin 10  RXD     <-> USB-TTL TX
+
+USE A 3.3V USB-TTL ADAPTER. A 5V adapter will damage the Pi.
+Do NOT connect VCC — the Pi powers itself from USB.
+
+Login: knot
+Pass:  knot   (change after first login: passwd)
+
+Once in:
+    sudo systemctl status knotd
+    sudo journalctl -u knotd -b
+    sudo cat /boot/firmware/knot-startup.log
+
+The same diagnostics are written to knot-startup.log on every boot,
+readable from Windows by popping the SD into a card reader — no
+serial adapter needed.
+EOF
+
 # ---- 7. Tear down chroot, compress, deploy --------------------------------
 
 echo "==> [7/7] Cleaning up and compressing image"
