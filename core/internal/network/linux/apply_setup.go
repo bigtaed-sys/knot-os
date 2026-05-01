@@ -13,6 +13,11 @@ import (
 
 // applySetup brings the host into the open-AP onboarding role:
 //
+//  0. Unblock Wi-Fi rfkill and set the regulatory domain. Pi OS Lite
+//     leaves the radio rfkill-blocked until a country is accepted;
+//     the kernel regulator with country "00" caps tx power so low
+//     no AP works. knotd owns the radio now, so unblock and set a
+//     sensible default before the user has picked one.
 //  1. Create ap0 on phy0 (idempotent).
 //  2. Stop wpa_supplicant on wlan0 if present (free the radio).
 //  3. Assign 192.168.42.1/24 to ap0.
@@ -21,11 +26,8 @@ import (
 //     dnsmasq on ap0.
 //  6. Load nftables rules that DNAT 80/443 from ap0 to knotd.
 //
-// Steps 1-5 are written to be idempotent: calling applySetup twice is
-// a no-op the second time except for restarting daemons with possibly
-// updated configs. The function always restarts hostapd / dnsmasq,
-// which is the simplest correct choice — a wizard apply happens
-// rarely and the disruption is bounded.
+// Steps are idempotent: calling applySetup twice is a no-op the second
+// time except for restarting daemons with possibly updated configs.
 func (b *LinuxBackend) applySetup(ctx context.Context, cfg config.Config) error {
 	lan := cfg.Network.LAN
 	if lan == nil {
@@ -35,6 +37,9 @@ func (b *LinuxBackend) applySetup(ctx context.Context, cfg config.Config) error 
 	if err != nil {
 		return fmt.Errorf("applySetup: %w", err)
 	}
+
+	// 0. Radio prerequisites.
+	b.unblockAndRegulate(ctx, cfg.Device.Country)
 
 	// 1. ap0 must exist. We pull wlan0's MAC into the SSID so two
 	//    KnotOS devices in the same room don't fight for the same

@@ -43,6 +43,11 @@ func (b *LinuxBackend) applyExtender(ctx context.Context, cfg config.Config) err
 		return fmt.Errorf("applyExtender: %w", err)
 	}
 
+	// 0. Radio prerequisites: unblock rfkill, set the regulatory
+	//    domain. Necessary on a fresh boot where Pi OS Lite leaves
+	//    the radio rfkill-blocked.
+	b.unblockAndRegulate(ctx, cfg.Device.Country)
+
 	// 1. ap0 must exist before anything else; on a single radio we
 	//    can create the interface even before the STA associates.
 	if err := b.ensureAP(ctx); err != nil {

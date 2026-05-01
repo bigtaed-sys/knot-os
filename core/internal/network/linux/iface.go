@@ -97,6 +97,35 @@ func (b *LinuxBackend) addrAdd(ctx context.Context, iface, cidr string) error {
 	return b.r.runOK(ctx, "ip", "addr", "add", cidr, "dev", iface)
 }
 
+// unblockAndRegulate frees the Wi-Fi radio from rfkill soft-block and
+// sets the kernel's regulatory domain to a usable country code.
+//
+// Both are needed on a stock Pi OS Lite install:
+//
+//   - rfkill is left blocked at boot until something (raspi-config, a
+//     wpa_supplicant connect, NetworkManager) accepts a regdomain.
+//     We mask all of those, so it stays blocked unless we unblock.
+//   - The kernel regulator defaults to "00" (world domain), which
+//     caps tx power so low that hostapd won't bring up an AP. We
+//     need a real country code.
+//
+// In setup mode the user has not picked a country yet (config has
+// "00" or "" — Default()'s value). We fall back to "DE": permissive
+// for 2.4 GHz channels 1-13 in most jurisdictions, no DFS shenanigans,
+// and a sensible "neutral EU" default that the wizard can override.
+//
+// All errors are ignored — these calls are best-effort and the
+// downstream hostapd start will produce a clearer failure if the
+// radio is genuinely unusable.
+func (b *LinuxBackend) unblockAndRegulate(ctx context.Context, country string) {
+	b.r.runIgnoreError(ctx, "rfkill", "unblock", "wifi")
+
+	if country == "" || country == "00" {
+		country = "DE"
+	}
+	b.r.runIgnoreError(ctx, "iw", "reg", "set", country)
+}
+
 // flipLocalBit toggles the locally-administered bit (0x02) of the
 // first octet of a MAC address. Returns the new MAC and ok=true on
 // success; ok=false if the input is not a parseable MAC.
