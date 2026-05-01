@@ -6,18 +6,21 @@
 #
 # Usage examples (from PowerShell at the repo root):
 #
-#   .\scripts\update-knot.ps1 -Host knot.local -Password mypass
-#   .\scripts\update-knot.ps1 -Host 192.168.42.1 -Password mypass -SkipBuild
+#   .\scripts\update-knot.ps1 -Address knot.local -Password mypass
+#   .\scripts\update-knot.ps1 -Address 192.168.42.1 -Password mypass -SkipBuild
 #   .\scripts\update-knot.ps1 -Serial COM4
 #
 # The serial path requires you to be logged into the Pi over the
 # USB-OTG / UART console first, with the `knot-update-receive` helper
 # running. The script tells you what to type if not.
+#
+# Note: -Address (not -Host) - PowerShell's $Host is a built-in
+# read-only variable, so we cannot use that as a parameter name.
 
 [CmdletBinding(DefaultParameterSetName = 'Http')]
 param(
     [Parameter(ParameterSetName = 'Http', Mandatory = $true)]
-    [string]$Host,
+    [string]$Address,
 
     [Parameter(ParameterSetName = 'Http')]
     [string]$Password,
