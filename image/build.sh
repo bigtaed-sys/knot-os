@@ -103,7 +103,12 @@ shopt -u nullglob
 mkdir -p "$CACHE_DIR" "$WORK_DIR" "$DEPLOY_DIR"
 if [[ ! -f "$LITE_IMG_XZ" ]] || [[ ! -s "$LITE_IMG_XZ" ]]; then
     echo "==> [4/7] Downloading Raspberry Pi OS Lite arm64 (~500 MB)"
-    run_user curl -fL --progress-bar -o "$LITE_IMG_XZ" "$LITE_URL"
+    # Download as root: build.sh creates image/cache/ as root, so a
+    # user-level curl cannot write into it. Letting root own the
+    # cache file is fine - everything in image/cache, image/work,
+    # image/deploy is cleaned by `image/build.ps1 -Clean` which runs
+    # as root, and humans rarely need to touch them by hand.
+    curl -fL --progress-bar -o "$LITE_IMG_XZ" "$LITE_URL"
 else
     echo "==> [4/7] Using cached $LITE_IMG_XZ ($(stat -c '%s' "$LITE_IMG_XZ") bytes)"
 fi
