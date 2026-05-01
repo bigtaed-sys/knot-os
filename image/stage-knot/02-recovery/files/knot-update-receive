@@ -1,0 +1,84 @@
+#!/bin/bash
+# Receive a new knotd binary over the current terminal (serial console)
+# and install it. Counterpart to scripts/update-knot.ps1's -Serial mode.
+#
+# Run as root:
+#   sudo knot-update-receive
+#
+# Wire protocol on stdin (line-oriented):
+#   KNOTUPDATE-BEGIN          - sender announces start
+#   <base64 line>             - one chunk per line (3 KB raw -> 4 KB b64)
+#   <base64 line>
+#   ...
+#   KNOTUPDATE-END            - sender finished
+#
+# We respond with KNOTUPDATE-OK <bytes> on success, KNOTUPDATE-FAIL <msg>
+# on any error, then exit. The script then atomically replaces
+# /usr/local/bin/knotd and asks systemd to restart the service.
+
+set -u
+TARGET=/usr/local/bin/knotd
+STAGING=/var/lib/knot/.knotd.update
+mkdir -p /var/lib/knot
+
+if [[ "$EUID" -ne 0 ]]; then
+    echo "knot-update-receive: must run as root" >&2
+    exit 1
+fi
+
+fail() {
+    echo "KNOTUPDATE-FAIL: $1"
+    rm -f "$STAGING"
+    exit 1
+}
+
+echo "knot-update-receive: waiting for KNOTUPDATE-BEGIN"
+while IFS= read -r line; do
+    if [[ "$line" == "KNOTUPDATE-BEGIN" ]]; then
+        break
+    fi
+done || fail "EOF before BEGIN"
+
+# Truncate staging file; we'll append decoded bytes per chunk.
+: > "$STAGING"
+chmod 0755 "$STAGING"
+
+LINES=0
+while IFS= read -r line; do
+    if [[ "$line" == "KNOTUPDATE-END" ]]; then
+        break
+    fi
+    if [[ -z "$line" ]]; then
+        continue
+    fi
+    if ! printf '%s' "$line" | base64 -d >> "$STAGING" 2>/dev/null; then
+        fail "base64 decode error on line $LINES"
+    fi
+    LINES=$((LINES + 1))
+done
+
+if [[ ! -s "$STAGING" ]]; then
+    fail "received empty file"
+fi
+
+# ELF magic check.
+read -r -n 4 -d '' MAGIC < "$STAGING" || true
+if [[ "$(head -c 4 "$STAGING" | od -An -c | tr -d ' \n')" != $'\\177ELF' ]]; then
+    fail "not an ELF binary"
+fi
+
+SIZE=$(stat -c '%s' "$STAGING")
+if [[ "$SIZE" -lt 1048576 ]]; then
+    fail "file too small ($SIZE bytes)"
+fi
+
+# Atomic rename.
+mv "$STAGING" "$TARGET" || fail "rename failed"
+chmod 0755 "$TARGET"
+
+echo "KNOTUPDATE-OK $SIZE"
+
+# Restart knotd in the background so the response gets a chance to
+# flush before our PID dies along with the parent shell.
+( sleep 1 && systemctl restart knotd ) &
+disown
