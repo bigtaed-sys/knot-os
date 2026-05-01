@@ -35,6 +35,33 @@ export function relativeTime(iso: string | undefined | null, now: Date = new Dat
 }
 
 /**
+ * humanDays renders a sorted array of weekday numbers (0=Sun..6=Sat)
+ * as a localized short string. Common groupings (every day,
+ * Mon-Fri, weekend) are collapsed; otherwise comma-separated short
+ * day names in week order.
+ */
+export function humanDays(days: number[]): string {
+	const t = get(_);
+	const set = new Set(days);
+	const weekdays = [1, 2, 3, 4, 5];
+	const weekends = [0, 6];
+	const all = [0, 1, 2, 3, 4, 5, 6];
+
+	const isAll = all.every((d) => set.has(d));
+	const isWeekdays = set.size === 5 && weekdays.every((d) => set.has(d));
+	const isWeekends = set.size === 2 && weekends.every((d) => set.has(d));
+
+	if (isAll) return t('profiles.days_everyday');
+	if (isWeekdays) return t('profiles.days_weekdays');
+	if (isWeekends) return t('profiles.days_weekends');
+
+	return Array.from(set)
+		.sort((a, b) => a - b)
+		.map((d) => t(`profiles.day_short_${d}`))
+		.join(', ');
+}
+
+/**
  * deviceIcon returns a Bootstrap-icons class name based on a device
  * label heuristic. Falls back to a generic device glyph.
  */

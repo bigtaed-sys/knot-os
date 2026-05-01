@@ -85,3 +85,25 @@ export interface Device {
 export interface DevicesResponse {
 	devices: Device[];
 }
+
+export interface BlockWindow {
+	/** 0=Sunday … 6=Saturday */
+	days: number[];
+	/** "HH:MM" 24h */
+	start: string;
+	/** "HH:MM" 24h */
+	end: string;
+}
+
+export interface Profile {
+	id: string;
+	name: string;
+	description?: string;
+	block_windows?: BlockWindow[];
+	dns_blocklists?: string[];
+	builtin: boolean;
+}
+
+export interface ProfilesResponse {
+	profiles: Profile[];
+}

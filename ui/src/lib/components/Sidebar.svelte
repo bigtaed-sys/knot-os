@@ -21,6 +21,7 @@
 	const coreItems: NavItem[] = [
 		{ path: '/', icon: 'bi-speedometer2', label: 'nav.dashboard' },
 		{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
+		{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
 		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
 	];

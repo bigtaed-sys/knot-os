@@ -3,29 +3,31 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, ApiError } from '$lib/api';
+	import { apiGet, ApiError, API_BASE } from '$lib/api';
 	import { relativeTime, deviceIcon } from '$lib/format';
-	import type { Device } from '$lib/types';
-	import { API_BASE } from '$lib/api';
+	import type { Device, Profile, ProfilesResponse } from '$lib/types';
 
 	// SvelteKit types $page.params as Record<string, string | undefined>;
 	// fall back to '' so encodeURIComponent never sees undefined.
 	const mac = $derived($page.params.mac ?? '');
 
 	let device = $state<Device | null>(null);
+	let profiles = $state<Profile[]>([]);
 	let loading = $state(true);
 	let notFound = $state(false);
 	let error = $state<string | null>(null);
 
 	let displayName = $state('');
+	let selectedProfile = $state('');
 	let saving = $state(false);
+	let savingProfile = $state(false);
 	let savedFlash = $state(false);
 
-	async function load() {
-		loading = true;
+	async function loadDevice() {
 		try {
 			device = await apiGet<Device>(`/devices/${encodeURIComponent(mac)}`);
 			displayName = device.display_name ?? '';
+			selectedProfile = device.profile_id ?? '';
 			notFound = false;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
@@ -37,8 +39,40 @@
 				return;
 			}
 			error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function loadProfiles() {
+		try {
+			const r = await apiGet<ProfilesResponse>('/profiles');
+			profiles = r.profiles;
+		} catch {
+			// non-fatal
+		}
+	}
+
+	async function load() {
+		loading = true;
+		await Promise.all([loadDevice(), loadProfiles()]);
+		loading = false;
+	}
+
+	async function setProfile(id: string) {
+		savingProfile = true;
+		try {
+			const res = await fetch(`${API_BASE}/devices/${encodeURIComponent(mac)}`, {
+				method: 'PATCH',
+				credentials: 'same-origin',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ profile_id: id })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			device = await res.json();
+			selectedProfile = device?.profile_id ?? '';
+		} catch (err) {
+			error = err instanceof Error ? err.message : String(err);
 		} finally {
-			loading = false;
+			savingProfile = false;
 		}
 	}
 
@@ -145,12 +179,61 @@
 
 			<dt class="text-zinc-500 dark:text-zinc-400">{$_('devices.first_seen')}</dt>
 			<dd>{relativeTime(device.first_seen)}</dd>
-
-			<dt class="text-zinc-500 dark:text-zinc-400">{$_('devices.profile')}</dt>
-			<dd class="text-zinc-500 dark:text-zinc-400">
-				{device.profile_id || $_('devices.no_profile')}
-			</dd>
 		</dl>
+	</section>
+
+	<!-- Profile picker -->
+	<section class="surface p-5 mb-5">
+		<h2 class="font-semibold mb-1 flex items-center gap-2">
+			<i class="bi bi-shield-check text-brand-500"></i>
+			{$_('device.profile_section')}
+		</h2>
+		<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">{$_('device.profile_help')}</p>
+
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+			<!-- "no profile" tile -->
+			<button
+				type="button"
+				disabled={savingProfile}
+				class="
+					text-left p-3 rounded-lg border transition-colors
+					{selectedProfile === ''
+						? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+						: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}
+				"
+				onclick={() => setProfile('')}
+			>
+				<div class="flex items-center gap-2">
+					<i class="bi bi-circle text-lg text-zinc-400"></i>
+					<span class="font-medium">{$_('device.profile_no_assignment')}</span>
+				</div>
+			</button>
+
+			{#each profiles as p}
+				<button
+					type="button"
+					disabled={savingProfile}
+					class="
+						text-left p-3 rounded-lg border transition-colors
+						{selectedProfile === p.id
+							? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}
+					"
+					onclick={() => setProfile(p.id)}
+				>
+					<div class="flex items-center gap-2 flex-wrap">
+						<i class="bi bi-shield-check text-lg text-brand-500"></i>
+						<span class="font-medium">{p.name}</span>
+						{#if p.builtin}
+							<span class="badge badge-info text-[10px]">{$_('profiles.builtin_badge')}</span>
+						{/if}
+					</div>
+					{#if p.description}
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 line-clamp-2">{p.description}</p>
+					{/if}
+				</button>
+			{/each}
+		</div>
 	</section>
 
 	<!-- Rename -->
