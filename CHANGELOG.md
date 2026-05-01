@@ -10,7 +10,7 @@ First release. Targets Raspberry Pi Zero 2W as a Wi-Fi extender — connects to 
 
 ### What works
 
-- **Flashable image** built via `sudo bash image/build.sh` (pi-gen, Bookworm arm64, ~11 MB knotd binary embedded with the SvelteKit UI).
+- **Flashable image** built via `sudo bash image/build.sh` — downloads the official Raspberry Pi OS Lite arm64 image, chroots in to install our extras (hostapd, dnsmasq, nftables, iw, isc-dhcp-client, avahi-daemon), injects the ~11 MB knotd binary (with the embedded SvelteKit UI) plus its systemd unit, and repackages. ~5–10 min total.
 - **First-run wizard**: open onboarding AP `KnotOS-setup-XXXX`, captive portal at `192.168.42.1`, four steps (device + admin password, scan + select upstream Wi-Fi, broadcast SSID, review). Issues a session cookie on completion.
 - **Wi-Fi extender role** on a single radio: simultaneous `ap0` + `wlan0` virtual interfaces on `phy0`, hostapd + wpa_supplicant + dnsmasq + nftables NAT, channel auto-aligned to the upstream.
 - **Web UI**: dashboard with live uplink/AP status (RSSI, client count), plugin list with enable/disable toggles, login screen with bcrypt-hashed admin password, session cookies with 24h TTL.

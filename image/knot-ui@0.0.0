@@ -1,0 +1,19 @@
+Repo root: E:\routerOS
+Using WSL distro: Ubuntu
+Checking WSL host...
+  user: bigtaed
+Syncing source: /mnt/e/routerOS/ -> /home/bigtaed/.knot-os-build/ (WSL)
+cannot delete non-empty directory: image/stage-knot/01-install-plugins/files/example-hello
+wsl command failed (exit 23): mkdir -p '/home/bigtaed/.knot-os-build/' && rsync -a --delete --exclude='.git/' --exclude
+='node_modules/' --exclude='ui/build/' --exclude='ui/.svelte-kit/' --exclude='dist/' --exclude='tmp/' --exclude='image/
+pi-gen/' --exclude='image/deploy/' --exclude='image/work/' --exclude='core/internal/web/dist/' '/mnt/e/routerOS/' '/hom
+e/bigtaed/.knot-os-build/'
+E:\routerOS\image\build.ps1:117 знак:32
++ ... CODE -ne 0) { throw "wsl command failed (exit $LASTEXITCODE): $cmd" }
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (wsl command fai...knot-os-build/':String) [], RuntimeException
+    + FullyQualifiedErrorId : wsl command failed (exit 23): mkdir -p '/home/bigtaed/.knot-os-build/' && rsync -a --del 
+   ete --exclude='.git/' --exclude='node_modules/' --exclude='ui/build/' --exclude='ui/.svelte-kit/' --exclude='dist/  
+  ' --exclude='tmp/' --exclude='image/pi-gen/' --exclude='image/deploy/' --exclude='image/work/' --exclude='core/int   
+ ernal/web/dist/' '/mnt/e/routerOS/' '/home/bigtaed/.knot-os-build/'
+ 

@@ -136,19 +136,17 @@ Write-Host "  user: $linuxUser"
 # sync with upstream pi-gen/depends if a build fails citing missing
 # packages.
 $aptPackages = @(
-    'quilt', 'parted',
-    'qemu-user-static', 'qemu-utils',
-    # NOTE: do not list qemu-user-binfmt here. On Ubuntu 24.04 it
-    # was merged into qemu-user-static and the two now conflict —
-    # asking apt for both forces a removal of one. pi-gen's stock
-    # depends file still names qemu-user-binfmt; build.sh patches
-    # that out after cloning pi-gen.
-    'debootstrap', 'zerofree', 'zip', 'dosfstools',
-    'libcap2-bin', 'libarchive-tools',
-    'grep', 'rsync', 'xz-utils', 'file', 'git', 'curl', 'bc',
-    'binfmt-support', 'kpartx', 'pigz', 'arch-test',
-    'pv', 'xxd', 'coreutils', 'gnupg', 'ca-certificates',
-    'golang-go', 'nodejs', 'npm'
+    # Toolchains for the UI / Go build steps.
+    'golang-go', 'nodejs', 'npm',
+    # qemu-user-static for arm64 binary execution under chroot.
+    'qemu-user-static', 'binfmt-support',
+    # losetup, mount, fdisk live in util-linux/mount/fdisk packages
+    # that are present by default on Ubuntu, but be explicit.
+    'util-linux', 'mount', 'fdisk',
+    # Image manipulation.
+    'parted', 'e2fsprogs', 'dosfstools', 'xz-utils',
+    # Misc.
+    'rsync', 'curl', 'ca-certificates', 'openssl'
 ) -join ' '
 $checkCmd = 'for p in ' + $aptPackages + '; do dpkg -s $p >/dev/null 2>&1 || echo $p; done'
 $missing = (& wsl.exe -d $Distro -e bash -lc $checkCmd | Out-String).Trim()

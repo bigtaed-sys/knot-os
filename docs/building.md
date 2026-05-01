@@ -55,10 +55,9 @@ Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
   ```bash
   sudo apt update
   sudo apt install -y \
-    quilt parted qemu-user-static qemu-user-binfmt qemu-utils \
-    debootstrap zerofree zip dosfstools libcap2-bin libarchive-tools \
-    grep rsync xz-utils file git curl bc binfmt-support kpartx pigz \
-    arch-test pv xxd coreutils gnupg ca-certificates
+    qemu-user-static binfmt-support \
+    parted e2fsprogs dosfstools xz-utils \
+    rsync curl ca-certificates openssl
   ```
 
 - Go 1.22+ and Node 18+ on `PATH` (these run as your normal user, not root).
@@ -69,7 +68,9 @@ Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
 sudo bash image/build.sh
 ```
 
-Takes 30–60 minutes on a typical laptop. The output is `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
+Takes about 5–10 minutes on a typical laptop (~2 min download for the Pi OS Lite base on first run, then chroot-install of our extras + image compression). The output is `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
+
+The script downloads the latest official Raspberry Pi OS Lite arm64 image, mounts it, installs `hostapd`, `dnsmasq`, `nftables`, `iw`, `isc-dhcp-client`, and `avahi-daemon` into the chroot, drops in `knotd` + `knotctl` + the systemd unit + the seed config + bundled plugins, masks the stock services that race for `wlan0`, and repackages. The base image is cached under `image/cache/` so subsequent runs skip the download.
 
 ### One-shot build (Windows)
 
@@ -118,21 +119,20 @@ The image ships with SSH enabled and a fallback user `knot` / password `knot`. C
 
 If the Wi-Fi setup ever leaves you locked out, plug a USB Ethernet adapter into the Pi (planned for v0.2; for v0.1 the only out-of-band path is removing the SD card and editing `/etc/knot/config.yaml` directly).
 
-## Pinning pi-gen to a specific revision
+## Pinning the base image
 
-`image/build.sh` clones `RPi-Distro/pi-gen` at `master` by default. To pin:
+By default the script downloads the latest Raspberry Pi OS Lite arm64 from the redirector at `downloads.raspberrypi.com`. Override via env to pin a specific release:
 
 ```bash
-sudo PIGEN_REF=2024-11-19-raspios-bookworm bash image/build.sh
+sudo LITE_URL=https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2025-05-13/2025-05-13-raspios-bookworm-arm64-lite.img.xz \
+    bash image/build.sh
 ```
-
-The pinned commit/tag must support arm64 (most recent ones do).
 
 ## Build cache
 
-`image/pi-gen/` is checked out in place and reused across runs. Subsequent builds skip debootstrap if `pi-gen/work/` is intact, dropping the typical rebuild to 5–15 minutes. To force a clean rebuild:
+`image/cache/raspios_lite_arm64.img.xz` is reused across builds. To force re-download (e.g. to pick up a newer Lite release):
 
 ```bash
-sudo rm -rf image/pi-gen/work image/deploy
+sudo rm -rf image/cache image/work image/deploy
 sudo bash image/build.sh
 ```

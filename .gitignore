@@ -17,6 +17,7 @@
 # Image build artifacts
 /image/deploy/
 /image/work/
+/image/cache/
 /image/pi-gen/
 /image/stage-knot/00-install-knotd/files/knotd
 /image/stage-knot/00-install-knotd/files/knotctl
