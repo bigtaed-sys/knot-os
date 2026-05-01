@@ -19,6 +19,15 @@
 /image/work/
 /image/cache/
 /image/pi-gen/
+
+# Defensive: cmd.exe sometimes interprets `>` inside echoed strings as
+# redirect operators, dropping zero-byte files into the cwd. Block the
+# specific names that have appeared in past runs so they never get
+# committed again.
+/image/Building
+/image/Installing
+/image/Starting
+/image/knot-ui@*
 /image/stage-knot/00-install-knotd/files/knotd
 /image/stage-knot/00-install-knotd/files/knotctl
 /image/stage-knot/01-install-plugins/files/example-hello/
