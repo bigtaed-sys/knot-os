@@ -28,6 +28,12 @@ QEMU_BIN="${QEMU_BIN:-/usr/bin/qemu-aarch64-static}"
 
 CACHE_DIR="$ROOT/image/cache"
 LITE_IMG_XZ="$CACHE_DIR/raspios_lite_arm64.img.xz"
+# BASE_IMG is the cached "Pi OS Lite + apt-installed deps + service
+# masks + serial console + recovery scripts", produced once on first
+# build and reused thereafter. The slow apt-install-via-qemu step
+# only re-runs when this file is missing (e.g. after -Clean, or if
+# the user manually deletes it to refresh package versions).
+BASE_IMG="$CACHE_DIR/knotos-base.img"
 WORK_DIR="$ROOT/image/work"
 WORK_IMG="$WORK_DIR/knotos.img"
 MOUNT_DIR="$WORK_DIR/mnt"
@@ -101,23 +107,6 @@ shopt -u nullglob
 # ---- 4. Download Pi OS Lite (cached) --------------------------------------
 
 mkdir -p "$CACHE_DIR" "$WORK_DIR" "$DEPLOY_DIR"
-if [[ ! -f "$LITE_IMG_XZ" ]] || [[ ! -s "$LITE_IMG_XZ" ]]; then
-    echo "==> [4/7] Downloading Raspberry Pi OS Lite arm64 (~500 MB)"
-    # Download as root: build.sh creates image/cache/ as root, so a
-    # user-level curl cannot write into it. Letting root own the
-    # cache file is fine - everything in image/cache, image/work,
-    # image/deploy is cleaned by `image/build.ps1 -Clean` which runs
-    # as root, and humans rarely need to touch them by hand.
-    curl -fL --progress-bar -o "$LITE_IMG_XZ" "$LITE_URL"
-else
-    echo "==> [4/7] Using cached $LITE_IMG_XZ ($(stat -c '%s' "$LITE_IMG_XZ") bytes)"
-fi
-
-# ---- 5. Decompress and loop-attach ----------------------------------------
-
-echo "==> [5/7] Decompressing image"
-xz -dc "$LITE_IMG_XZ" > "$WORK_IMG"
-echo "    image size: $(stat -c '%s' "$WORK_IMG") bytes"
 
 cleanup() {
     set +e
@@ -132,60 +121,147 @@ cleanup() {
 }
 trap cleanup EXIT
 
-LOOP="$(losetup --find --show --partscan "$WORK_IMG")"
-echo "    loop: $LOOP"
-# Some kernels need a moment for partition nodes to appear.
-udevadm settle 2>/dev/null || sleep 1
-BOOT_PART="${LOOP}p1"
-ROOT_PART="${LOOP}p2"
+# Helper: loop-mount $1 at $MOUNT_DIR with /proc /sys /dev bind mounts
+# and qemu-aarch64-static dropped in for chroot-time arm64 binary
+# execution. Sets $LOOP for the cleanup trap to tear down.
+mount_image() {
+    local img="$1"
+    LOOP="$(losetup --find --show --partscan "$img")"
+    udevadm settle 2>/dev/null || sleep 1
+    BOOT_PART="${LOOP}p1"
+    ROOT_PART="${LOOP}p2"
+    mkdir -p "$MOUNT_DIR"
+    mount "$ROOT_PART" "$MOUNT_DIR"
+    mkdir -p "$MOUNT_DIR/boot/firmware"
+    mount "$BOOT_PART" "$MOUNT_DIR/boot/firmware"
+    mount --bind /dev      "$MOUNT_DIR/dev"
+    mount --bind /dev/pts  "$MOUNT_DIR/dev/pts" 2>/dev/null || true
+    mount -t proc proc     "$MOUNT_DIR/proc"
+    mount -t sysfs sys     "$MOUNT_DIR/sys"
+    cp "$QEMU_BIN" "$MOUNT_DIR/usr/bin/qemu-aarch64-static"
+    cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf.knotos-bak" 2>/dev/null || true
+    cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf"
+    if [[ -f "$MOUNT_DIR/etc/ld.so.preload" ]]; then
+        mv "$MOUNT_DIR/etc/ld.so.preload" "$MOUNT_DIR/etc/ld.so.preload.knotos-bak"
+    fi
+}
 
-mkdir -p "$MOUNT_DIR"
-mount "$ROOT_PART" "$MOUNT_DIR"
-mkdir -p "$MOUNT_DIR/boot/firmware"
-mount "$BOOT_PART" "$MOUNT_DIR/boot/firmware"
-
-# Bind-mount kernel virtual filesystems so apt's post-install scripts work.
-mount --bind /dev      "$MOUNT_DIR/dev"
-mount --bind /dev/pts  "$MOUNT_DIR/dev/pts" 2>/dev/null || true
-mount -t proc proc     "$MOUNT_DIR/proc"
-mount -t sysfs sys     "$MOUNT_DIR/sys"
-
-# qemu-aarch64-static for arm64 binary execution under chroot.
-cp "$QEMU_BIN" "$MOUNT_DIR/usr/bin/qemu-aarch64-static"
-
-# DNS for apt inside chroot.
-cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf.knotos-bak" 2>/dev/null || true
-cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf"
-
-# Pi OS Lite ships with /etc/ld.so.preload pointing at libcofi which
-# does not load under qemu emulation. Move it aside for the chroot
-# session, restore on cleanup.
-if [[ -f "$MOUNT_DIR/etc/ld.so.preload" ]]; then
-    mv "$MOUNT_DIR/etc/ld.so.preload" "$MOUNT_DIR/etc/ld.so.preload.knotos-bak"
-fi
+# Helper: tear down chroot artifacts so the image is bootable arm64-only.
+unmount_image() {
+    if [[ -f "$MOUNT_DIR/etc/ld.so.preload.knotos-bak" ]]; then
+        mv "$MOUNT_DIR/etc/ld.so.preload.knotos-bak" "$MOUNT_DIR/etc/ld.so.preload"
+    fi
+    rm -f "$MOUNT_DIR/usr/bin/qemu-aarch64-static"
+    if [[ -f "$MOUNT_DIR/etc/resolv.conf.knotos-bak" ]]; then
+        mv "$MOUNT_DIR/etc/resolv.conf.knotos-bak" "$MOUNT_DIR/etc/resolv.conf"
+    else
+        rm -f "$MOUNT_DIR/etc/resolv.conf"
+    fi
+    cleanup
+    LOOP=""
+}
 
 run_in_chroot() {
     chroot "$MOUNT_DIR" /usr/bin/qemu-aarch64-static /bin/bash -lc "$1"
 }
 
-# ---- 6. Install our extras + inject knotd --------------------------------
+# ---- 5. Build the base image once (slow path) -----------------------------
+#
+# The base image is Pi OS Lite + our apt deps + service masks + serial
+# console + recovery scripts. Everything that doesn't change between
+# knotd builds. Cached at $BASE_IMG and reused on subsequent runs.
 
-echo "==> [6/7] Installing dependencies in chroot (this is the slow step, ~3-5 min)"
-run_in_chroot "
-    set -e
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y --no-install-recommends \
-        hostapd \
-        dnsmasq \
-        nftables \
-        iw \
-        wireless-regdb \
-        isc-dhcp-client \
-        avahi-daemon
-    apt-get clean
-    rm -rf /var/lib/apt/lists/*
-"
+if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
+    if [[ ! -f "$LITE_IMG_XZ" ]] || [[ ! -s "$LITE_IMG_XZ" ]]; then
+        echo "==> [4/7] Downloading Raspberry Pi OS Lite arm64 (~500 MB)"
+        curl -fL --progress-bar -o "$LITE_IMG_XZ" "$LITE_URL"
+    else
+        echo "==> [4/7] Using cached $LITE_IMG_XZ"
+    fi
+
+    echo "==> [5/7] Building base image (one-time, ~5 min via qemu chroot)"
+    echo "    decompressing Lite -> $BASE_IMG"
+    xz -dc "$LITE_IMG_XZ" > "$BASE_IMG"
+
+    mount_image "$BASE_IMG"
+
+    echo "    apt install (this is the slow step)"
+    run_in_chroot "
+        set -e
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y --no-install-recommends \
+            hostapd \
+            dnsmasq \
+            nftables \
+            iw \
+            wireless-regdb \
+            isc-dhcp-client \
+            avahi-daemon
+        apt-get clean
+        rm -rf /var/lib/apt/lists/*
+    "
+
+    # Service masks (race-with-knotd avoidance). These are part of the
+    # base because they don't change between knotd builds.
+    echo "    masking competing services"
+    run_in_chroot "
+        set -e
+        systemctl mask NetworkManager.service           2>/dev/null || true
+        systemctl disable NetworkManager.service        2>/dev/null || true
+        systemctl mask NetworkManager-wait-online.service 2>/dev/null || true
+        systemctl mask hostapd.service                  2>/dev/null || true
+        systemctl mask dnsmasq.service                  2>/dev/null || true
+        systemctl disable wpa_supplicant.service        2>/dev/null || true
+        systemctl disable dhcpcd.service                2>/dev/null || true
+        systemctl mask dhcpcd.service                   2>/dev/null || true
+        systemctl enable ssh.service
+        systemctl enable getty@ttyGS0.service           2>/dev/null || true
+        systemctl enable serial-getty@ttyGS0.service    2>/dev/null || true
+    "
+
+    # Default hostname; overwritten if user picks a name in the wizard.
+    echo "knot" > "$MOUNT_DIR/etc/hostname"
+    sed -i 's/127\.0\.1\.1.*/127.0.1.1\tknot/' "$MOUNT_DIR/etc/hosts" 2>/dev/null || \
+        echo "127.0.1.1	knot" >> "$MOUNT_DIR/etc/hosts"
+
+    # First-boot user setup so RPi's first-run does not block anywhere.
+    echo 'knot:$(openssl passwd -6 knot)' > "$MOUNT_DIR/boot/firmware/userconf.txt"
+
+    # Boot config: serial console (UART0 + USB-OTG g_serial).
+    CONFIG_TXT="$MOUNT_DIR/boot/firmware/config.txt"
+    if ! grep -q '^enable_uart=1' "$CONFIG_TXT" 2>/dev/null; then
+        {
+            echo
+            echo "# KnotOS: serial console - both UART0 GPIO and USB-OTG gadget"
+            echo "enable_uart=1"
+            echo "dtoverlay=disable-bt"
+            echo "dtoverlay=dwc2"
+        } >> "$CONFIG_TXT"
+    fi
+
+    CMDLINE_TXT="$MOUNT_DIR/boot/firmware/cmdline.txt"
+    if ! grep -q 'console=serial0' "$CMDLINE_TXT" 2>/dev/null; then
+        sed -i '1s/^/console=serial0,115200 /' "$CMDLINE_TXT"
+    fi
+    if ! grep -q 'modules-load=dwc2,g_serial' "$CMDLINE_TXT" 2>/dev/null; then
+        sed -i 's/\brootwait\b/rootwait modules-load=dwc2,g_serial/' "$CMDLINE_TXT"
+    fi
+
+    unmount_image
+    echo "    base image cached at $BASE_IMG ($(stat -c '%s' "$BASE_IMG") bytes)"
+else
+    echo "==> [4/7] Using cached base image $BASE_IMG"
+    echo "==> [5/7] (skipping base build - delete $BASE_IMG to refresh)"
+fi
+
+# ---- 6. Fast path: copy base, inject knotd files --------------------------
+
+echo "==> [6/7] Injecting knotd into image (fast path)"
+echo "    cp $BASE_IMG -> $WORK_IMG"
+cp "$BASE_IMG" "$WORK_IMG"
+
+mount_image "$WORK_IMG"
 
 echo "    copying KnotOS files"
 install -m 755 -D "$FILES_DIR/knotd"               "$MOUNT_DIR/usr/local/bin/knotd"
@@ -217,78 +293,17 @@ cat > "$MOUNT_DIR/etc/tmpfiles.d/knot.conf" <<'EOF'
 d /run/knot 0755 root root -
 EOF
 
-# Hostname.
-echo "knot" > "$MOUNT_DIR/etc/hostname"
-sed -i 's/127\.0\.1\.1.*/127.0.1.1\tknot/' "$MOUNT_DIR/etc/hosts" 2>/dev/null || \
-    echo "127.0.1.1	knot" >> "$MOUNT_DIR/etc/hosts"
-
-# Hand the network stack to knotd. Mask everything that races for wlan0.
-echo "    configuring services"
+# Enable knot-specific services (the rest of the system services are
+# already configured in the cached base image).
 run_in_chroot "
     set -e
-    systemctl mask NetworkManager.service           2>/dev/null || true
-    systemctl disable NetworkManager.service        2>/dev/null || true
-    systemctl mask NetworkManager-wait-online.service 2>/dev/null || true
-    systemctl mask hostapd.service                  2>/dev/null || true
-    systemctl mask dnsmasq.service                  2>/dev/null || true
-    systemctl disable wpa_supplicant.service        2>/dev/null || true
-    systemctl disable dhcpcd.service                2>/dev/null || true
-    systemctl mask dhcpcd.service                   2>/dev/null || true
     systemctl enable knotd.service
     systemctl enable knot-bootlog.service
-    systemctl enable ssh.service
-"
-
-# Skip Raspberry Pi OS first-boot user setup (we ship a working
-# 'knot' user from the Lite image). userconf.txt sets the initial
-# username:password so the wizard does not block on it.
-echo 'knot:$(openssl passwd -6 knot)' > "$MOUNT_DIR/boot/firmware/userconf.txt"
-
-# Two parallel serial-console paths:
-#   1. USB OTG gadget (preferred — no adapter hardware needed):
-#      Pi Zero 2W has a real USB-OTG port labeled "USB" (the one closer
-#      to the HDMI port; the other one is power-only). Loading dwc2 in
-#      device mode + g_serial exposes /dev/ttyGS0 on the Pi and a CDC
-#      ACM "USB Serial Device" on the host. Windows / macOS / Linux
-#      all auto-detect — open the resulting COM port at 115200 and
-#      a login prompt appears.
-#   2. UART0 GPIO console (works without USB host, but needs a 3.3V
-#      USB-TTL adapter wired to pins 6/8/10).
-#
-# On Zero 2W, UART0 is wired to the Bluetooth chip by default; disable-bt
-# frees it for the console. KnotOS does not use BT.
-CONFIG_TXT="$MOUNT_DIR/boot/firmware/config.txt"
-if ! grep -q '^enable_uart=1' "$CONFIG_TXT" 2>/dev/null; then
-    {
-        echo
-        echo "# KnotOS: serial console — both UART0 GPIO and USB-OTG gadget"
-        echo "enable_uart=1"
-        echo "dtoverlay=disable-bt"
-        echo "dtoverlay=dwc2"
-    } >> "$CONFIG_TXT"
-fi
-
-CMDLINE_TXT="$MOUNT_DIR/boot/firmware/cmdline.txt"
-# UART0 console.
-if ! grep -q 'console=serial0' "$CMDLINE_TXT" 2>/dev/null; then
-    sed -i '1s/^/console=serial0,115200 /' "$CMDLINE_TXT"
-fi
-# USB-OTG serial gadget. Inserted right after `rootwait` so it loads
-# at the right point in the boot sequence.
-if ! grep -q 'modules-load=dwc2,g_serial' "$CMDLINE_TXT" 2>/dev/null; then
-    sed -i 's/\brootwait\b/rootwait modules-load=dwc2,g_serial/' "$CMDLINE_TXT"
-fi
-
-# Spawn a getty on /dev/ttyGS0 (the device node g_serial creates) so the
-# user gets an actual login prompt over USB.
-run_in_chroot "
-    set -e
-    systemctl enable getty@ttyGS0.service 2>/dev/null || true
-    systemctl enable serial-getty@ttyGS0.service 2>/dev/null || true
 "
 
 # A README on the FAT partition so the user can read the recovery
-# instructions from Windows without booting the Pi.
+# instructions from Windows without booting the Pi. Written every
+# build so doc updates show up without rebuilding the base image.
 cat > "$MOUNT_DIR/boot/firmware/SERIAL-CONSOLE.txt" <<'EOF'
 KnotOS — Serial console
 =======================
@@ -348,20 +363,13 @@ EOF
 # ---- 7. Tear down chroot, compress, deploy --------------------------------
 
 echo "==> [7/7] Cleaning up and compressing image"
-
-# Restore preload, drop the qemu binary so the rootfs is bootable arm64-only.
-if [[ -f "$MOUNT_DIR/etc/ld.so.preload.knotos-bak" ]]; then
-    mv "$MOUNT_DIR/etc/ld.so.preload.knotos-bak" "$MOUNT_DIR/etc/ld.so.preload"
-fi
-rm -f "$MOUNT_DIR/usr/bin/qemu-aarch64-static"
-if [[ -f "$MOUNT_DIR/etc/resolv.conf.knotos-bak" ]]; then
-    mv "$MOUNT_DIR/etc/resolv.conf.knotos-bak" "$MOUNT_DIR/etc/resolv.conf"
-else
-    rm -f "$MOUNT_DIR/etc/resolv.conf"
-fi
-
-cleanup
+unmount_image
 trap - EXIT
+
+# Wipe any old .img.xz from previous builds so the deploy/ dir only
+# ever has the most recent artifact - keeps the Windows-side rsync
+# back-copy from accumulating stale images.
+rm -f "$DEPLOY_DIR"/*.img.xz
 
 TS="$(date +%Y%m%d-%H%M)"
 OUT="$DEPLOY_DIR/${TS}-KnotOS-zero2w-${VERSION}.img.xz"

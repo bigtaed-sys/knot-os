@@ -224,6 +224,11 @@ $winDeploy = Join-Path $repoRoot 'image\deploy'
 New-Item -ItemType Directory -Path $winDeploy -Force | Out-Null
 
 Write-Host 'Copying built image back to Windows...'
+# Wipe Windows-side deploy/*.img.xz first so the directory only ever
+# contains the most recent build. The WSL side already pruned old
+# images before producing the new one, so we are not nuking anything
+# we still have on disk elsewhere.
+Get-ChildItem $winDeploy -Filter '*.img.xz' -ErrorAction SilentlyContinue | Remove-Item -Force
 $copyCmd = "cp -v '$dst'image/deploy/*.img.xz '/mnt/$drive$rest/image/deploy/' 2>&1"
 wsl-run-as-user $copyCmd
 

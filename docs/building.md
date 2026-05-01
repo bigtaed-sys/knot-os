@@ -145,11 +145,27 @@ sudo LITE_URL=https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspio
     bash image/build.sh
 ```
 
-## Build cache
+## Build cache and incremental builds
 
-`image/cache/raspios_lite_arm64.img.xz` is reused across builds. To force re-download (e.g. to pick up a newer Lite release):
+The image build is split into two phases:
+
+1. **Base build** — Pi OS Lite + apt-installed dependencies (`hostapd`, `dnsmasq`, `nftables`, `iw`, `isc-dhcp-client`, `avahi-daemon`) + service masks + serial-console config. Produces `image/cache/knotos-base.img`. Slow (~5 min via qemu-emulated apt). Runs once.
+
+2. **Knotd injection** — copies the base image to `image/work/knotos.img`, drops in the freshly cross-compiled `knotd` / `knotctl` binary, default config, plugins, and `knot-bootlog` recovery script. Compresses to `.img.xz`. Fast (~2-3 min, dominated by xz compression).
+
+Subsequent builds skip phase 1 entirely — only phase 2 runs, so re-flashing with a new knotd binary takes only a few minutes total.
+
+To refresh the base (e.g. to pick up newer apt package versions or a newer Pi OS Lite release):
+
+```bash
+sudo rm -f image/cache/knotos-base.img            # rebuild base, keep Lite download
+sudo rm -f image/cache/raspios_lite_arm64.img.xz  # also re-download Lite
+sudo bash image/build.sh
+```
+
+Or wipe everything (full slow path):
 
 ```bash
 sudo rm -rf image/cache image/work image/deploy
-sudo bash image/build.sh
+sudo bash image/build.sh   # or image\build.bat -Clean from Windows
 ```
