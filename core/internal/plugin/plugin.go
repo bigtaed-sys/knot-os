@@ -38,6 +38,32 @@ type Manifest struct {
 	Version string `yaml:"version" json:"version"`
 	// Description is one-or-two-line summary shown on the plugin list.
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// Menu items contributed by this plugin to the KnotOS sidebar.
+	// Empty for plugins that don't add UI; non-empty entries are
+	// surfaced to the web UI and rendered when the plugin is enabled.
+	Menu []MenuItem `yaml:"menu,omitempty" json:"menu,omitempty"`
+}
+
+// MenuItem describes a single sidebar entry contributed by a plugin.
+//
+// In v0.1 the UI side of plugin menus is read-only metadata: the
+// route lands at the plugin's installed UI directory (eventually
+// served at /plugins/<id>/). For now there is no plugin runtime, so
+// menu items pointing at non-existent routes will 404 — that's
+// expected, the manifest schema is in place for v0.2 plugins.
+type MenuItem struct {
+	// Path is the SPA route to navigate to. Must start with '/'.
+	Path string `yaml:"path" json:"path"`
+	// Label is the visible text. Plugins can ship localized labels
+	// by referencing translation keys (e.g. "myplugin.menu.home")
+	// once we add per-plugin i18n; for v0.1, raw strings are fine.
+	Label string `yaml:"label" json:"label"`
+	// Icon is a Bootstrap Icons class name, e.g. "bi-stars". Optional;
+	// if empty the UI falls back to a generic plug icon.
+	Icon string `yaml:"icon,omitempty" json:"icon,omitempty"`
+	// Order is the sort key inside the plugins section (lower runs
+	// first). Defaults to 100 when unset.
+	Order int `yaml:"order,omitempty" json:"order,omitempty"`
 }
 
 // idRE accepts the usual reverse-DNS-ish or short ID styles. The
@@ -55,6 +81,17 @@ func (m Manifest) validate() error {
 	}
 	if m.Version == "" {
 		return errors.New("plugin version is required")
+	}
+	for i, item := range m.Menu {
+		if item.Path == "" {
+			return fmt.Errorf("menu[%d].path is required", i)
+		}
+		if item.Path[0] != '/' {
+			return fmt.Errorf("menu[%d].path %q must start with '/'", i, item.Path)
+		}
+		if item.Label == "" {
+			return fmt.Errorf("menu[%d].label is required", i)
+		}
 	}
 	return nil
 }

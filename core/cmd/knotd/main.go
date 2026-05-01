@@ -122,6 +122,11 @@ func main() {
 		Sessions:   auth.NewSessions(),
 		Plugins:    plugins,
 	})
+	// Production mode unlocks the system endpoints (reboot/shutdown/
+	// update) that would be destructive in dev. Tied to the absence
+	// of -dev because that's the same condition that picks the real
+	// LinuxBackend.
+	apiSrv.SetProductionMode(!*dev)
 
 	srv := httpserver.New(httpserver.Options{
 		Addr:   *listenAddr,

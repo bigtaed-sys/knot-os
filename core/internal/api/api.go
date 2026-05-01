@@ -37,6 +37,7 @@ type Server struct {
 	backend    network.Backend
 	sessions   *auth.Sessions
 	plugins    *plugin.Registry
+	production bool
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -88,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/auth/me", s.handleMe)
 		s.MountPlugins(r)
+		s.MountSystem(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

@@ -143,6 +143,51 @@ func TestEnabledStatePreservedAcrossDiscovery(t *testing.T) {
 	}
 }
 
+func TestMenuParsedAndValidated(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "menud", `id: menud
+name: Menu Demo
+version: 0.1.0
+menu:
+  - path: /plugins/menud/home
+    label: Home
+    icon: bi-house
+    order: 10
+  - path: /plugins/menud/settings
+    label: Settings
+    icon: bi-gear
+`)
+	r := NewRegistry(dir)
+	if err := r.Discover(); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	got, ok := r.Get("menud")
+	if !ok {
+		t.Fatal("menud not registered")
+	}
+	if len(got.Menu) != 2 {
+		t.Fatalf("expected 2 menu items, got %d", len(got.Menu))
+	}
+	if got.Menu[0].Path != "/plugins/menud/home" || got.Menu[0].Icon != "bi-house" {
+		t.Errorf("menu item 0 mismatch: %+v", got.Menu[0])
+	}
+}
+
+func TestMenuRejectsBadPath(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "bad", `id: bad
+name: Bad
+version: 0.1.0
+menu:
+  - path: relative/path
+    label: Bad
+`)
+	r := NewRegistry(dir)
+	if err := r.Discover(); err == nil {
+		t.Error("expected error for relative menu path")
+	}
+}
+
 func TestApplyEnabledMap(t *testing.T) {
 	dir := t.TempDir()
 	writeManifest(t, dir, "p1", "id: p1\nname: One\nversion: 1\n")
