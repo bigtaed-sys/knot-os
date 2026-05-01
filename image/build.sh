@@ -225,8 +225,17 @@ if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
     sed -i 's/127\.0\.1\.1.*/127.0.1.1\tknot/' "$MOUNT_DIR/etc/hosts" 2>/dev/null || \
         echo "127.0.1.1	knot" >> "$MOUNT_DIR/etc/hosts"
 
-    # First-boot user setup so RPi's first-run does not block anywhere.
-    echo 'knot:$(openssl passwd -6 knot)' > "$MOUNT_DIR/boot/firmware/userconf.txt"
+    # First-boot user setup so Pi OS Lite's userconf-pi service creates
+    # a 'knot' user with password 'knot' on first boot - otherwise the
+    # device boots into "no user configured" state and there is no way
+    # to log in at the console.
+    #
+    # userconf.txt format: username:hashed_password (one line).
+    # Generate the hash inside the chroot so it uses the target's
+    # libcrypt (mostly cosmetic - openssl passwd -6 produces SHA-512
+    # crypt that any modern glibc accepts).
+    KNOT_PW_HASH="$(openssl passwd -6 knot)"
+    echo "knot:${KNOT_PW_HASH}" > "$MOUNT_DIR/boot/firmware/userconf.txt"
 
     # Boot config: serial console (UART0 + USB-OTG g_serial).
     CONFIG_TXT="$MOUNT_DIR/boot/firmware/config.txt"
