@@ -129,6 +129,12 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 		// Log via writeJSON-side; don't fail the request.
 	}
 
+	// If the profile assignment changed, ask the scheduler to
+	// re-evaluate now instead of waiting up to 30s.
+	if body.ProfileID != nil {
+		s.kick()
+	}
+
 	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
+	"github.com/knot-os/knot-os/core/internal/profile"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -33,13 +34,15 @@ var ErrConfigNotInitialized = errors.New("api: config not initialized")
 // Server holds API state and produces an http.Handler. The zero value is
 // not usable; construct via New.
 type Server struct {
-	configPath string
-	version    string
-	backend    network.Backend
-	sessions   *auth.Sessions
-	plugins    *plugin.Registry
-	devices    *deviceregistry.Registry
-	production bool
+	configPath    string
+	version       string
+	backend       network.Backend
+	sessions      *auth.Sessions
+	plugins       *plugin.Registry
+	devices       *deviceregistry.Registry
+	profiles      *profile.Registry
+	kickScheduler func()
+	production    bool
 
 	mu  sync.RWMutex
 	cfg config.Config
@@ -93,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountPlugins(r)
 		s.MountSystem(r)
 		s.MountDevices(r)
+		s.MountProfiles(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

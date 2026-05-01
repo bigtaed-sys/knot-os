@@ -205,6 +205,12 @@ func main() {
 		Plugins:    plugins,
 	})
 	apiSrv.SetDeviceRegistry(devices)
+	apiSrv.SetProfileRegistry(profiles)
+	// SchedulerKick lets the API trigger an immediate scheduler tick
+	// after a device's profile or a profile's schedule changes.
+	apiSrv.SetSchedulerKick(func() {
+		go sched.RunOnce()
+	})
 	// Production mode unlocks the system endpoints (reboot/shutdown/
 	// update) that would be destructive in dev. Tied to the absence
 	// of -dev because that's the same condition that picks the real
