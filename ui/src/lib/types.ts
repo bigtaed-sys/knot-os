@@ -68,3 +68,20 @@ export interface Plugin {
 export interface PluginsResponse {
 	plugins: Plugin[];
 }
+
+export interface Device {
+	mac: string;
+	label: string;
+	hostname?: string;
+	display_name?: string;
+	ip?: string;
+	online: boolean;
+	lease_expires?: string;
+	first_seen: string;
+	last_seen: string;
+	profile_id?: string;
+}
+
+export interface DevicesResponse {
+	devices: Device[];
+}
