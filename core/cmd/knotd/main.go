@@ -13,6 +13,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/api"
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
@@ -98,6 +99,29 @@ func main() {
 	if err := backend.Apply(ctx, cfg); err != nil {
 		logger.Fatalf("initial apply: %v", err)
 	}
+
+	// Device registry: tracks LAN devices via dnsmasq leases + a YAML
+	// store of user-set names/profiles. Started here so the API has it
+	// from the first request.
+	leasePath := ""
+	if !*dev {
+		leasePath = "/var/lib/misc/dnsmasq.leases"
+	}
+	devices := deviceregistry.NewRegistry(deviceregistry.Options{
+		StoreFile: "/etc/knot/devices.yaml",
+		LeaseFile: leasePath,
+		Logger:    logger,
+	})
+	if err := devices.Load(); err != nil {
+		logger.Printf("deviceregistry load: %v", err)
+	}
+	if err := devices.RefreshFromLeases(); err != nil {
+		logger.Printf("deviceregistry initial refresh: %v", err)
+	}
+	if err := devices.StartLeaseWatcher(ctx); err != nil {
+		logger.Printf("deviceregistry watcher: %v", err)
+	}
+	logger.Printf("device registry: %d known", len(devices.List()))
 
 	plugins := plugin.NewRegistry(*pluginsDir)
 	if err := plugins.Discover(); err != nil {
