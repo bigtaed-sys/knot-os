@@ -71,9 +71,12 @@ func (b *LinuxBackend) applySetup(ctx context.Context, cfg config.Config) error 
 	hostapdConf := BuildHostapdConf(HostapdParams{
 		Interface: IfaceAP,
 		SSID:      ssid,
-		Country:   cfg.Device.Country,
-		Channel:   6,
-		Band:      "2.4",
+		// effectiveCountry: pass the same fallback the kernel
+		// regulator got. country=00 in hostapd.conf makes
+		// hostapd refuse to start.
+		Country: effectiveCountry(cfg.Device.Country),
+		Channel: 6,
+		Band:    "2.4",
 	})
 	if err := writeRuntimeFile(HostapdConfPath, hostapdConf); err != nil {
 		return err

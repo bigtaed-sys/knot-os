@@ -97,8 +97,24 @@ func (b *LinuxBackend) addrAdd(ctx context.Context, iface, cidr string) error {
 	return b.r.runOK(ctx, "ip", "addr", "add", cidr, "dev", iface)
 }
 
+// effectiveCountry returns the ISO country code to actually use for
+// the kernel regulator and hostapd's country_code. Substitutes a
+// permissive default ("DE") when no real country has been picked
+// (setup mode default of "00" / empty), because country=00 caps Wi-Fi
+// tx power so low that hostapd refuses to bring up an AP.
+//
+// Callers should use this value EVERYWHERE - the kernel regulator,
+// the hostapd config, and the wpa_supplicant config - to avoid the
+// mismatch where one component thinks "DE" and another thinks "00".
+func effectiveCountry(c string) string {
+	if c == "" || c == "00" {
+		return "DE"
+	}
+	return c
+}
+
 // unblockAndRegulate frees the Wi-Fi radio from rfkill soft-block and
-// sets the kernel's regulatory domain to a usable country code.
+// sets the kernel's regulatory domain.
 //
 // Both are needed on a stock Pi OS Lite install:
 //
@@ -106,24 +122,14 @@ func (b *LinuxBackend) addrAdd(ctx context.Context, iface, cidr string) error {
 //     wpa_supplicant connect, NetworkManager) accepts a regdomain.
 //     We mask all of those, so it stays blocked unless we unblock.
 //   - The kernel regulator defaults to "00" (world domain), which
-//     caps tx power so low that hostapd won't bring up an AP. We
-//     need a real country code.
-//
-// In setup mode the user has not picked a country yet (config has
-// "00" or "" — Default()'s value). We fall back to "DE": permissive
-// for 2.4 GHz channels 1-13 in most jurisdictions, no DFS shenanigans,
-// and a sensible "neutral EU" default that the wizard can override.
+//     caps tx power so low that hostapd won't bring up an AP.
 //
 // All errors are ignored — these calls are best-effort and the
 // downstream hostapd start will produce a clearer failure if the
 // radio is genuinely unusable.
 func (b *LinuxBackend) unblockAndRegulate(ctx context.Context, country string) {
 	b.r.runIgnoreError(ctx, "rfkill", "unblock", "wifi")
-
-	if country == "" || country == "00" {
-		country = "DE"
-	}
-	b.r.runIgnoreError(ctx, "iw", "reg", "set", country)
+	b.r.runIgnoreError(ctx, "iw", "reg", "set", effectiveCountry(country))
 }
 
 // flipLocalBit toggles the locally-administered bit (0x02) of the

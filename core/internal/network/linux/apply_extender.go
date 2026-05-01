@@ -91,7 +91,7 @@ func (b *LinuxBackend) applyExtender(ctx context.Context, cfg config.Config) err
 	hostapdConf := BuildHostapdConf(HostapdParams{
 		Interface: IfaceAP,
 		SSID:      cfg.Network.AP.SSID,
-		Country:   cfg.Device.Country,
+		Country:   effectiveCountry(cfg.Device.Country),
 		Channel:   channel,
 		Band:      cfg.Network.AP.Band,
 		PSK:       cfg.Network.AP.PSK,
@@ -149,7 +149,7 @@ func (b *LinuxBackend) applyExtender(ctx context.Context, cfg config.Config) err
 // supervised on wlan0. Blocks briefly to let the supplicant launch.
 func (b *LinuxBackend) startUplink(ctx context.Context, cfg config.Config) error {
 	conf := BuildWpaSupplicantConf(WpaSupplicantParams{
-		Country: cfg.Device.Country,
+		Country: effectiveCountry(cfg.Device.Country),
 		SSID:    cfg.Network.Uplink.SSID,
 		PSK:     cfg.Network.Uplink.PSK,
 	})
