@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/knot-os/knot-os/core/internal/api"
 	"github.com/knot-os/knot-os/core/internal/auth"
@@ -18,7 +19,39 @@ import (
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
 	"github.com/knot-os/knot-os/core/internal/plugin"
+	"github.com/knot-os/knot-os/core/internal/profile"
+	"github.com/knot-os/knot-os/core/internal/scheduler"
 )
+
+// schedulerDevices adapts deviceregistry.Registry to the scheduler's
+// minimal DeviceProvider interface.
+type schedulerDevices struct{ r *deviceregistry.Registry }
+
+func (s schedulerDevices) List() []scheduler.Device {
+	all := s.r.List()
+	out := make([]scheduler.Device, 0, len(all))
+	for _, d := range all {
+		out = append(out, scheduler.Device{MAC: d.MAC, ProfileID: d.ProfileID})
+	}
+	return out
+}
+
+// schedulerProfiles adapts profile.Registry to ProfileLookup.
+type schedulerProfiles struct{ r *profile.Registry }
+
+func (s schedulerProfiles) IsBlockingAt(id string, t time.Time) bool {
+	p, ok := s.r.Get(id)
+	if !ok {
+		return false
+	}
+	return p.IsBlockingAt(t)
+}
+
+// nopMACSetUpdater is the dev-mode / mock fallback for the scheduler's
+// nftables side-effect.
+type nopMACSetUpdater struct{}
+
+func (nopMACSetUpdater) UpdateBlockedMACs(_ []string) error { return nil }
 
 // listenPort returns the numeric port from a listen address like ":80"
 // or "127.0.0.1:8080". Used by LinuxBackend to set up captive-portal
@@ -122,6 +155,31 @@ func main() {
 		logger.Printf("deviceregistry watcher: %v", err)
 	}
 	logger.Printf("device registry: %d known", len(devices.List()))
+
+	// Profile registry: built-in + user profiles, persisted to YAML.
+	profiles := profile.NewRegistry("/etc/knot/profiles.yaml")
+	if err := profiles.Load(); err != nil {
+		logger.Printf("profiles load: %v", err)
+	}
+	logger.Printf("profiles: %d loaded", len(profiles.List()))
+
+	// Scheduler: every 30s recomputes which devices are currently in
+	// a block window and pushes their MACs to the kernel block-set
+	// via nftables (or the no-op updater in dev mode).
+	var updater scheduler.MACSetUpdater = nopMACSetUpdater{}
+	if !*dev {
+		// The Linux backend implements UpdateBlockedMACs.
+		if lb, ok := backend.(*netlinux.LinuxBackend); ok {
+			updater = lb
+		}
+	}
+	sched := scheduler.New(scheduler.Options{
+		Devices:  schedulerDevices{r: devices},
+		Profiles: schedulerProfiles{r: profiles},
+		Updater:  updater,
+		Logger:   logger,
+	})
+	go sched.Run(ctx)
 
 	plugins := plugin.NewRegistry(*pluginsDir)
 	if err := plugins.Discover(); err != nil {

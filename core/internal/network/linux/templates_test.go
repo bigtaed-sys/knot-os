@@ -123,6 +123,10 @@ func TestNftablesExtenderHasNatAndForward(t *testing.T) {
 		"masquerade",
 		"192.168.42.0/24",
 		"established,related",
+		// Block-set scaffolding for the scheduler:
+		"set blocked_macs",
+		"type ether_addr",
+		"ether saddr @blocked_macs drop",
 	)
 }
 

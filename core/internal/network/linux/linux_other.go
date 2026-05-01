@@ -53,3 +53,10 @@ func (b *LinuxBackend) Scan(_ context.Context) ([]network.ScannedNetwork, error)
 
 // Close is a no-op on non-Linux platforms.
 func (b *LinuxBackend) Close() {}
+
+// UpdateBlockedMACs returns an error on non-Linux platforms.
+// Production callers should use the scheduler's nop-updater fallback
+// when running with the mock backend.
+func (b *LinuxBackend) UpdateBlockedMACs(_ []string) error {
+	return errors.New("LinuxBackend is only available on Linux")
+}
