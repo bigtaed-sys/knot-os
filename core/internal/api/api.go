@@ -21,6 +21,7 @@ import (
 
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 )
@@ -37,6 +38,7 @@ type Server struct {
 	backend    network.Backend
 	sessions   *auth.Sessions
 	plugins    *plugin.Registry
+	devices    *deviceregistry.Registry
 	production bool
 
 	mu  sync.RWMutex
@@ -90,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/auth/me", s.handleMe)
 		s.MountPlugins(r)
 		s.MountSystem(r)
+		s.MountDevices(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
