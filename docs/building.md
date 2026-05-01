@@ -119,12 +119,18 @@ The image ships with three independent recovery channels:
 
 1. **Boot-time diagnostic log.** On every boot, `knotd-bootlog.service` writes `systemctl status`, `journalctl`, `iw`, `rfkill`, and recent `dmesg` output to `/boot/firmware/knot-startup.log`. Pop the SD into your computer; Windows mounts the boot partition automatically and you can open the file in any text editor.
 
-2. **Serial console.** Enabled on UART0 at 115200 8N1. Connect a **3.3V** USB-TTL adapter to GPIO:
+2. **Serial console — two parallel paths:**
+
+   **a) USB OTG (no extra hardware).** Plug a regular micro-USB cable from the Pi Zero 2W's *data* port (the one closer to the HDMI socket) into your computer. The Pi powers itself from that cable and shows up as a USB Serial Device: `COMx` on Windows, `/dev/cu.usbmodemXXXX` on macOS, `/dev/ttyACM0` on Linux. Open at 115200 8N1 — a login prompt appears.
+
+   **b) GPIO UART.** For the case where the Pi can't reach a USB host (already plugged into power-only adapter, embedded into something, etc). Connect a **3.3V** USB-TTL adapter to:
    - Pin 6 (GND) ↔ USB-TTL GND
    - Pin 8 (TXD) ↔ USB-TTL RX
    - Pin 10 (RXD) ↔ USB-TTL TX
 
-   **Do not use a 5V adapter — it will damage the Pi.** Open `/dev/ttyUSB0` (Linux) or the COMx port (Windows) at 115200 8N1, no flow control. Login: `knot` / `knot`. The same pinout is mirrored to `/boot/firmware/SERIAL-CONSOLE.txt` for offline reference.
+   **Do not use a 5V adapter — it will damage the Pi.** Same 115200 8N1 settings.
+
+   The same instructions are mirrored to `/boot/firmware/SERIAL-CONSOLE.txt` for offline reference.
 
 3. **SSH** is enabled by default and listens on whatever IP knotd assigns once the Wi-Fi extender role is up. Default credentials `knot` / `knot` — change immediately on a real deployment.
 
