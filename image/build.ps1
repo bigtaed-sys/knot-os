@@ -178,6 +178,12 @@ if ($Clean) {
 }
 
 Write-Host "Syncing source: $src -> $dst (WSL)"
+# Excludes are split into two categories:
+#   - Editor/IDE noise we never want to sync (.git, node_modules, ...)
+#   - Build outputs that end up root-owned in WSL (cache, staged
+#     binaries/plugins, pi-gen tree, deploy/). Without excluding these,
+#     a second sync as the unprivileged user fails with EACCES trying
+#     to --delete root-owned files left by the previous build.
 $rsyncCmd = "mkdir -p '$dst' && rsync -a --delete " +
     "--exclude='.git/' " +
     "--exclude='node_modules/' " +
@@ -185,10 +191,14 @@ $rsyncCmd = "mkdir -p '$dst' && rsync -a --delete " +
     "--exclude='ui/.svelte-kit/' " +
     "--exclude='dist/' " +
     "--exclude='tmp/' " +
+    "--exclude='core/internal/web/dist/' " +
     "--exclude='image/pi-gen/' " +
     "--exclude='image/deploy/' " +
     "--exclude='image/work/' " +
-    "--exclude='core/internal/web/dist/' " +
+    "--exclude='image/cache/' " +
+    "--exclude='image/stage-knot/00-install-knotd/files/knotd' " +
+    "--exclude='image/stage-knot/00-install-knotd/files/knotctl' " +
+    "--exclude='image/stage-knot/01-install-plugins/files/' " +
     "'$src' '$dst'"
 wsl-run-as-user $rsyncCmd
 
