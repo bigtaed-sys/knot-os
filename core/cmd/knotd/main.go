@@ -11,10 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"net"
+
 	"github.com/knot-os/knot-os/core/internal/api"
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
+	knotdns "github.com/knot-os/knot-os/core/internal/dns"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
@@ -52,6 +55,34 @@ func (s schedulerProfiles) IsBlockingAt(id string, t time.Time) bool {
 type nopMACSetUpdater struct{}
 
 func (nopMACSetUpdater) UpdateBlockedMACs(_ []string) error { return nil }
+
+// dnsDeviceLookup bridges deviceregistry + profile.Registry into
+// the dns.DeviceLookup interface: given a source IP, return the
+// device's MAC and the blocklist names from its assigned profile.
+type dnsDeviceLookup struct {
+	devices  *deviceregistry.Registry
+	profiles *profile.Registry
+}
+
+func (d dnsDeviceLookup) BlocklistsForIP(ip net.IP) (string, []string, bool) {
+	if ip == nil {
+		return "", nil, false
+	}
+	target := ip.String()
+	for _, dev := range d.devices.List() {
+		if dev.IP == target {
+			if dev.ProfileID == "" {
+				return dev.MAC, nil, true
+			}
+			p, ok := d.profiles.Get(dev.ProfileID)
+			if !ok {
+				return dev.MAC, nil, true
+			}
+			return dev.MAC, p.DNSBlocklists, true
+		}
+	}
+	return "", nil, false
+}
 
 // listenPort returns the numeric port from a listen address like ":80"
 // or "127.0.0.1:8080". Used by LinuxBackend to set up captive-portal
@@ -180,6 +211,24 @@ func main() {
 		Logger:   logger,
 	})
 	go sched.Run(ctx)
+
+	// Blocklist registry + downloader. The downloader fetches its
+	// configured sources at boot (after a short delay so it doesn't
+	// race the rest of startup), once daily, and on demand via
+	// /api/dns/refresh (M11d). On disk caches survive reboots so a
+	// device offline at boot still has filtering on the second boot.
+	dnsBlocklists := knotdns.NewRegistry()
+	dnsDownloader := knotdns.NewDownloader(knotdns.DownloaderOptions{
+		Registry: dnsBlocklists,
+		Logger:   logger,
+	})
+	go dnsDownloader.Run(ctx)
+
+	// dnsLookup bridges the device + profile registries into the DNS
+	// server's per-IP filter. Built now so M11c can hand it to the
+	// resolver when the LinuxBackend starts/stops the listener.
+	dnsLookup := dnsDeviceLookup{devices: devices, profiles: profiles}
+	_ = dnsLookup // suppressed until M11c wires the resolver
 
 	plugins := plugin.NewRegistry(*pluginsDir)
 	if err := plugins.Discover(); err != nil {
