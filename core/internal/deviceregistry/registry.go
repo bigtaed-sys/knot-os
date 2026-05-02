@@ -124,6 +124,30 @@ func (r *Registry) SetProfileID(mac, id string) (Device, error) {
 	return r.Update(mac, func(d *Device) { d.ProfileID = id })
 }
 
+// Forget removes a device from the registry. Used by the UI to clean
+// up stale entries that won't come back — typically duplicates from
+// iOS/Android private MAC randomization, where a single physical
+// phone shows up under several MACs over time.
+//
+// If the device's MAC reappears in a future lease event,
+// RefreshFromLeases will re-create the entry from scratch (with a
+// fresh FirstSeen). Callers who want the deletion to stick should
+// only forget devices whose lease has already expired.
+func (r *Registry) Forget(mac string) error {
+	mac = normalizeMAC(mac)
+	if mac == "" {
+		return fmt.Errorf("invalid mac")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.devices[mac]; !ok {
+		return fmt.Errorf("device %s not registered", mac)
+	}
+	delete(r.devices, mac)
+	r.dirty = true
+	return nil
+}
+
 // --- lease integration ------------------------------------------------------
 
 // RefreshFromLeases reads the current dnsmasq lease file and merges

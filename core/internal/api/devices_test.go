@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
@@ -126,6 +128,106 @@ func TestPatchDeviceUpdatesNameAndProfile(t *testing.T) {
 	}
 	if got.Label != "Anna's Phone" {
 		t.Errorf("Label: %q", got.Label)
+	}
+}
+
+func TestGetDeviceWithEncodedMAC(t *testing.T) {
+	srv, _ := newDeviceTestServer(t)
+	cookie := login(t, srv, testPassword)
+
+	leaseFile := filepath.Join(t.TempDir(), "leases")
+	if err := writeFile(leaseFile, "1746140000 dc:a6:32:11:22:33 192.168.42.150 my-phone *\n"); err != nil {
+		t.Fatal(err)
+	}
+	dr := deviceregistry.NewRegistry(deviceregistry.Options{
+		StoreFile: filepath.Join(t.TempDir(), "store.yaml"),
+		LeaseFile: leaseFile,
+	})
+	if err := dr.RefreshFromLeases(); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetDeviceRegistry(dr)
+
+	// Send the URL with %3A-encoded colons — what every browser
+	// produces when the SPA does encodeURIComponent(mac).
+	req := httptest.NewRequest(http.MethodGet,
+		"/devices/dc%3Aa6%3A32%3A11%3A22%3A33", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("encoded MAC: want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+	var got deviceJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MAC != "dc:a6:32:11:22:33" {
+		t.Errorf("MAC: %q", got.MAC)
+	}
+}
+
+func TestDeleteOfflineDevice(t *testing.T) {
+	srv, _ := newDeviceTestServer(t)
+	cookie := login(t, srv, testPassword)
+
+	// Lease that expired in the past — device counts as offline.
+	leaseFile := filepath.Join(t.TempDir(), "leases")
+	if err := writeFile(leaseFile,
+		"1700000000 aa:bb:cc:dd:ee:ff 192.168.42.51 ghost *\n"); err != nil {
+		t.Fatal(err)
+	}
+	dr := deviceregistry.NewRegistry(deviceregistry.Options{
+		StoreFile: filepath.Join(t.TempDir(), "store.yaml"),
+		LeaseFile: leaseFile,
+	})
+	if err := dr.RefreshFromLeases(); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetDeviceRegistry(dr)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/devices/aa%3Abb%3Acc%3Add%3Aee%3Aff", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete offline: want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+	if _, ok := dr.Get("aa:bb:cc:dd:ee:ff"); ok {
+		t.Error("device should be gone from registry")
+	}
+}
+
+func TestDeleteOnlineDeviceRefused(t *testing.T) {
+	srv, _ := newDeviceTestServer(t)
+	cookie := login(t, srv, testPassword)
+
+	farFuture := time.Now().Add(8 * time.Hour).Unix()
+	leaseFile := filepath.Join(t.TempDir(), "leases")
+	if err := writeFile(leaseFile,
+		fmt.Sprintf("%d aa:bb:cc:dd:ee:01 192.168.42.52 live *\n", farFuture)); err != nil {
+		t.Fatal(err)
+	}
+	dr := deviceregistry.NewRegistry(deviceregistry.Options{
+		StoreFile: filepath.Join(t.TempDir(), "store.yaml"),
+		LeaseFile: leaseFile,
+	})
+	if err := dr.RefreshFromLeases(); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetDeviceRegistry(dr)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/devices/aa%3Abb%3Acc%3Add%3Aee%3A01", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("online delete: want 409, got %d body=%s", rec.Code, rec.Body)
 	}
 }
 

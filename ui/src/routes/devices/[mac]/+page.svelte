@@ -22,6 +22,7 @@
 	let saving = $state(false);
 	let savingProfile = $state(false);
 	let savedFlash = $state(false);
+	let deleting = $state(false);
 
 	async function loadDevice() {
 		try {
@@ -99,6 +100,30 @@
 
 	function reset() {
 		displayName = device?.hostname ?? '';
+	}
+
+	async function forgetDevice() {
+		if (!device) return;
+		const label = device.label;
+		if (!confirm($_('devices.forget_confirm', { values: { name: label } }))) return;
+		deleting = true;
+		try {
+			const res = await fetch(`${API_BASE}/devices/${encodeURIComponent(mac)}`, {
+				method: 'DELETE',
+				credentials: 'same-origin'
+			});
+			if (res.status === 409) {
+				const body = (await res.json()) as { error?: { message?: string } };
+				error = body.error?.message ?? $_('devices.forget_online_error');
+				return;
+			}
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			goto('/devices');
+		} catch (err) {
+			error = err instanceof Error ? err.message : String(err);
+		} finally {
+			deleting = false;
+		}
 	}
 
 	onMount(load);
@@ -280,4 +305,31 @@
 			</div>
 		{/if}
 	</section>
+
+	<!-- Forget / remove device -->
+	{#if !device.online}
+		<section class="surface p-5 mt-5 border-rose-200/60 dark:border-rose-900/40">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-trash3 text-rose-500"></i>
+				{$_('devices.forget_section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-3">
+				{$_('devices.forget_help')}
+			</p>
+			<button
+				type="button"
+				class="btn-ghost text-rose-600 hover:text-rose-700 dark:text-rose-400"
+				disabled={deleting}
+				onclick={forgetDevice}
+			>
+				{#if deleting}
+					<span class="spinner"></span>
+					{$_('devices.forgetting')}
+				{:else}
+					<i class="bi bi-trash3"></i>
+					{$_('devices.forget')}
+				{/if}
+			</button>
+		</section>
+	{/if}
 {/if}

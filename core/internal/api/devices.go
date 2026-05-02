@@ -4,12 +4,27 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 )
+
+// macParam pulls {mac} from the URL and percent-decodes it. chi does
+// NOT URL-decode path parameters by default, so a UI that sends
+// /devices/dc%3Aa6%3A32%3A11%3A22%3A33 would otherwise hit our
+// handlers with a 32-char string that the registry rightly refuses
+// — visible to the user as "device not found" on every detail page.
+func macParam(r *http.Request) string {
+	raw := chi.URLParam(r, "mac")
+	dec, err := url.PathUnescape(raw)
+	if err != nil {
+		return raw
+	}
+	return dec
+}
 
 // MountDevices registers /devices/* under the auth-gated group.
 //
@@ -31,6 +46,7 @@ func (s *Server) MountDevices(r chi.Router) {
 	r.Get("/devices", s.handleListDevices)
 	r.Get("/devices/{mac}", s.handleGetDevice)
 	r.Patch("/devices/{mac}", s.handlePatchDevice)
+	r.Delete("/devices/{mac}", s.handleDeleteDevice)
 }
 
 // SetDeviceRegistry attaches a registry to the server. Called from main.
@@ -79,7 +95,7 @@ func (s *Server) handleListDevices(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
-	mac := chi.URLParam(r, "mac")
+	mac := macParam(r)
 	d, ok := s.devices.Get(mac)
 	if !ok {
 		writeError(w, http.StatusNotFound, "device_not_found", "no such device")
@@ -96,7 +112,7 @@ type devicePatch struct {
 }
 
 func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
-	mac := chi.URLParam(r, "mac")
+	mac := macParam(r)
 	var body devicePatch
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
@@ -136,6 +152,40 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
+}
+
+// handleDeleteDevice removes a device entry from the registry. The
+// primary use case is cleaning up duplicate entries left by iOS /
+// Android private MAC randomization — one physical phone appearing
+// under several MACs as it cycles through randomized addresses.
+//
+// We refuse to delete a device that's currently online: that would
+// be confusing (it would silently come back on the next lease tick).
+// The user gets a 409 with a clear message.
+func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	d, ok := s.devices.Get(mac)
+	if !ok {
+		writeError(w, http.StatusNotFound, "device_not_found", "no such device")
+		return
+	}
+	if d.Online(time.Now()) {
+		writeError(w, http.StatusConflict, "device_online",
+			"cannot remove an online device — wait for its lease to expire")
+		return
+	}
+	if err := s.devices.Forget(mac); err != nil {
+		writeError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+		return
+	}
+	if err := s.devices.FlushIfDirty(); err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
+		return
+	}
+	// Schedule re-evaluates the block-set; without a kick the deleted
+	// MAC could linger in nftables until the next 30s tick.
+	s.kick()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // errDeviceNotFound is reserved for future typed-error paths from the

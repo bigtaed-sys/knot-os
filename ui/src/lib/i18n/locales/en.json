@@ -93,7 +93,13 @@
 		"save": "Save",
 		"saving": "Saving…",
 		"saved": "Saved",
-		"back_to_list": "← Back to list"
+		"back_to_list": "← Back to list",
+		"forget_section": "Forget this device",
+		"forget_help": "Removes the entry from the list. Useful for duplicates created by iOS/Android private-MAC randomization, where one phone shows up under several MACs over time. If the same MAC reconnects, the entry comes back automatically.",
+		"forget": "Forget",
+		"forgetting": "Removing…",
+		"forget_confirm": "Forget device \"{name}\"?",
+		"forget_online_error": "Device is online — wait for it to disconnect first"
 	},
 	"auth": {
 		"login_title": "Sign in to KnotOS",
