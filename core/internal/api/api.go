@@ -45,6 +45,7 @@ type Server struct {
 	dns             *dnsServices
 	tls             *knottls.Materials
 	tlsSubject      func() knottls.LeafSubject
+	sealer          config.Sealer
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -77,6 +78,11 @@ func New(opts Options) *Server {
 		cfg:        opts.Initial,
 	}
 }
+
+// SetSealer wires the at-rest secret sealer used by config writes.
+// Pass nil (the default) to write configs as plaintext — that's
+// what dev mode and the v0.1/v0.2 tests use.
+func (s *Server) SetSealer(sl config.Sealer) { s.sealer = sl }
 
 // SetOnConfigApplied registers a callback that fires after every
 // successful config application — PUT /api/config and POST
@@ -246,7 +252,7 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
 		return
 	}
-	if err := config.Save(s.configPath, incoming); err != nil {
+	if err := config.SaveWith(s.configPath, incoming, s.sealer); err != nil {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}

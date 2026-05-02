@@ -24,6 +24,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	"github.com/knot-os/knot-os/core/internal/scheduler"
+	"github.com/knot-os/knot-os/core/internal/secrets"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 )
 
@@ -190,6 +191,8 @@ func main() {
 		tlsListenAddr = flag.String("tls-listen", ":443", "HTTPS listen address (empty disables)")
 		tlsDir        = flag.String("tls-dir", "/etc/knot/tls", "directory holding the device root CA + leaf cert")
 		noTLS         = flag.Bool("no-tls", false, "disable TLS entirely (dev / debug)")
+		seedPath      = flag.String("secrets-seed", secrets.DefaultSeedPath, "path to the random seed used to derive the at-rest encryption key")
+		machineIDPath = flag.String("secrets-machine-id", secrets.DefaultMachineIDPath, "path to /etc/machine-id (mixed into the encryption key); empty to skip")
 		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 	)
 	flag.Parse()
@@ -210,11 +213,44 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(*configPath)
+	// Bring up the at-rest secrets sealer before the config load:
+	// the YAML may contain `enc:v1:` PSKs that need to be unwrapped.
+	// In -dev mode we skip the sealer entirely; the dev YAML stays
+	// cleartext for easy editing. On a real device the seed file is
+	// generated once and lives on the FAT boot partition.
+	var sealer config.Sealer
+	if !*dev {
+		key, err := secrets.LoadOrCreateKey(secrets.SeedOptions{
+			SeedPath:      *seedPath,
+			MachineIDPath: *machineIDPath,
+		})
+		if err != nil {
+			logger.Fatalf("secrets key: %v", err)
+		}
+		s, err := secrets.New(key)
+		if err != nil {
+			logger.Fatalf("secrets sealer: %v", err)
+		}
+		sealer = s
+	}
+
+	cfg, needsMigration, err := config.LoadWithMigration(*configPath, sealer)
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
 	}
 	logger.Printf("config loaded: device=%q role=%q", cfg.Device.Name, cfg.Role)
+
+	// If the loaded config contained any cleartext PSKs (legacy
+	// v0.1/v0.2 format), persist it back encrypted now. One-shot:
+	// after this completes the file's secrets are wrapped and
+	// subsequent boots see needsMigration=false.
+	if sealer != nil && needsMigration {
+		if err := config.SaveWith(*configPath, cfg, sealer); err != nil {
+			logger.Printf("secrets migration: %v", err)
+		} else {
+			logger.Printf("secrets migration: encrypted PSKs at rest")
+		}
+	}
 
 	// Pick a backend. -dev uses the mock everywhere; otherwise we
 	// build the LinuxBackend (which only compiles fully on Linux —
@@ -375,6 +411,7 @@ func main() {
 	apiSrv.SetDeviceRegistry(devices)
 	apiSrv.SetProfileRegistry(profiles)
 	apiSrv.SetDNSServices(dnsLog, dnsBlocklists, dnsDownloader)
+	apiSrv.SetSealer(sealer)
 	if tlsMaterials != nil {
 		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
 			return leafSubjectFor(apiSrv.Snapshot())

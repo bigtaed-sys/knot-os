@@ -116,7 +116,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
 		return
 	}
-	if err := config.Save(s.configPath, finished); err != nil {
+	if err := config.SaveWith(s.configPath, finished, s.sealer); err != nil {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}

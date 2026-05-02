@@ -67,7 +67,7 @@ func (s *Server) handleSetPluginEnabled(w http.ResponseWriter, r *http.Request) 
 	s.cfg = cfg
 	s.mu.Unlock()
 
-	if err := config.Save(s.configPath, cfg); err != nil {
+	if err := config.SaveWith(s.configPath, cfg, s.sealer); err != nil {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
