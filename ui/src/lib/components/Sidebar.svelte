@@ -22,6 +22,7 @@
 		{ path: '/', icon: 'bi-speedometer2', label: 'nav.dashboard' },
 		{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
 		{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
+		{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
 		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
 	];

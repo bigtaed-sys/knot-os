@@ -107,3 +107,41 @@ export interface Profile {
 export interface ProfilesResponse {
 	profiles: Profile[];
 }
+
+export interface DNSTopBlocked {
+	name: string;
+	count: number;
+}
+
+export interface DNSSourceStats {
+	url: string;
+	last_fetch?: string;
+	last_success?: string;
+	last_error?: string;
+	entries_added?: number;
+}
+
+export interface DNSStats {
+	queries: number;
+	blocked: number;
+	blocked_ratio: number;
+	top_blocked: DNSTopBlocked[];
+	buffer_size: number;
+	buffer_cap: number;
+	blocklists: Record<string, number>;
+	sources?: Record<string, DNSSourceStats>;
+}
+
+export interface DNSQuery {
+	when: string;
+	src_mac?: string;
+	src_ip: string;
+	qname: string;
+	qtype: string;
+	blocked: boolean;
+	blocked_by?: string;
+}
+
+export interface DNSQueriesResponse {
+	queries: DNSQuery[];
+}
