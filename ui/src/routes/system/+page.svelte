@@ -3,9 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, ApiError, API_BASE } from '$lib/api';
-	import type { SystemStatus } from '$lib/types';
+	import type { SystemStatus, TLSInfo } from '$lib/types';
 
 	let status = $state<SystemStatus | null>(null);
+	let tls = $state<TLSInfo | null>(null);
+	let tlsAvailable = $state(true);
+	let regenerating = $state(false);
 	let busy = $state<string | null>(null);
 	let updateMsg = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
@@ -15,6 +18,40 @@
 			status = await apiGet<SystemStatus>('/status');
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) goto('/login', { replaceState: true });
+		}
+		try {
+			tls = await apiGet<TLSInfo>('/tls/info');
+			tlsAvailable = true;
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 503) {
+				tlsAvailable = false;
+			}
+		}
+	}
+
+	async function regenerateLeaf() {
+		if (!confirm($_('security.regenerate_confirm'))) return;
+		regenerating = true;
+		try {
+			tls = await apiPost<TLSInfo>('/tls/regenerate');
+		} catch (e) {
+			console.error(e);
+		} finally {
+			regenerating = false;
+		}
+	}
+
+	function fpShort(fp: string): string {
+		if (!fp) return '';
+		const compact = fp.replace(/:/g, '').toUpperCase();
+		return compact.slice(0, 4) + ' ' + compact.slice(4, 8) + ' ' + compact.slice(8, 12) + '…';
+	}
+
+	function fmtDate(s: string): string {
+		try {
+			return new Date(s).toLocaleDateString();
+		} catch {
+			return s;
 		}
 	}
 
@@ -98,6 +135,57 @@
 			<div class="spinner text-zinc-400"></div>
 		{/if}
 	</section>
+
+	<!-- Security / TLS -->
+	{#if tlsAvailable}
+		<section class="surface p-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-shield-lock text-brand-500"></i>
+				{$_('security.section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">{$_('security.subtitle')}</p>
+
+			{#if tls}
+				<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm mb-4">
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.root_fingerprint')}</dt>
+					<dd class="font-mono break-all" title={tls.root_fingerprint}>{fpShort(tls.root_fingerprint)}</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.root_expires')}</dt>
+					<dd>{fmtDate(tls.root_not_after)}</dd>
+
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.leaf_fingerprint')}</dt>
+					<dd class="font-mono break-all" title={tls.leaf_fingerprint}>{fpShort(tls.leaf_fingerprint)}</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.leaf_expires')}</dt>
+					<dd>{fmtDate(tls.leaf_not_after)}</dd>
+
+					{#if tls.leaf_dns_names && tls.leaf_dns_names.length > 0}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.leaf_names')}</dt>
+						<dd class="font-mono text-xs">{tls.leaf_dns_names.join(', ')}</dd>
+					{/if}
+					{#if tls.leaf_ips && tls.leaf_ips.length > 0}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('security.leaf_ips')}</dt>
+						<dd class="font-mono text-xs">{tls.leaf_ips.join(', ')}</dd>
+					{/if}
+				</dl>
+			{/if}
+
+			<div class="flex flex-wrap gap-3">
+				<a class="btn-primary" href="/setup-ca.crt" download="knot-root-ca.crt">
+					<i class="bi bi-download"></i>
+					{$_('security.download_root')}
+				</a>
+				<button class="btn-ghost" disabled={regenerating} onclick={regenerateLeaf}>
+					{#if regenerating}
+						<span class="spinner"></span>
+						{$_('security.regenerating')}
+					{:else}
+						<i class="bi bi-arrow-clockwise"></i>
+						{$_('security.regenerate')}
+					{/if}
+				</button>
+			</div>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-3">{$_('security.install_help')}</p>
+		</section>
+	{/if}
 
 	<!-- Update -->
 	<section class="surface p-5">

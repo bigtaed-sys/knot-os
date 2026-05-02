@@ -218,6 +218,21 @@
 		"update_success": "Updated. Restarting knotd…",
 		"update_error": "Update failed: {message}"
 	},
+	"security": {
+		"section": "Security (HTTPS)",
+		"subtitle": "Local root certificate that signs the admin UI's TLS cert. Install it on your devices once and the browser will stop warning about an \"unsafe connection\".",
+		"root_fingerprint": "Root fingerprint",
+		"root_expires": "Root expires",
+		"leaf_fingerprint": "Leaf fingerprint",
+		"leaf_expires": "Leaf expires",
+		"leaf_names": "Names",
+		"leaf_ips": "IPs",
+		"download_root": "Download root certificate",
+		"regenerate": "Regenerate leaf",
+		"regenerating": "Regenerating…",
+		"regenerate_confirm": "Re-issue the leaf? The root stays the same, so trust copies installed on your devices remain valid. The browser may ask you to reconnect right after.",
+		"install_help": "On iOS and macOS you also need to enable the root in Trusted Root Certificates (Settings → General → About → Certificate Trust Settings). On Android, install through Settings → Security → Advanced → Encryption & credentials → Install from SD card."
+	},
 	"protection": {
 		"title": "Protection",
 		"subtitle": "DNS-level ad and tracker blocking, scoped per device and profile",

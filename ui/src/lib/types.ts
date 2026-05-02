@@ -145,3 +145,12 @@ export interface DNSQuery {
 export interface DNSQueriesResponse {
 	queries: DNSQuery[];
 }
+
+export interface TLSInfo {
+	root_fingerprint: string;
+	root_not_after: string;
+	leaf_fingerprint: string;
+	leaf_not_after: string;
+	leaf_dns_names?: string[];
+	leaf_ips?: string[];
+}

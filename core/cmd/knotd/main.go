@@ -24,6 +24,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	"github.com/knot-os/knot-os/core/internal/scheduler"
+	knottls "github.com/knot-os/knot-os/core/internal/tls"
 )
 
 // schedulerDevices adapts deviceregistry.Registry to the scheduler's
@@ -62,6 +63,34 @@ func (nopMACSetUpdater) UpdateBlockedMACs(_ []string) error { return nil }
 type dnsDeviceLookup struct {
 	devices  *deviceregistry.Registry
 	profiles *profile.Registry
+}
+
+// leafSubjectFor builds the TLS leaf-cert subject for the daemon
+// from the current config: device hostname (so `<name>.local`
+// resolves to a trusted name) plus the LAN gateway IP (the address
+// users actually type into the address bar). Loopback and
+// localhost are added unconditionally inside BuildLeafSubject.
+func leafSubjectFor(cfg config.Config) knottls.LeafSubject {
+	var ips []net.IP
+	if cfg.Network.LAN != nil {
+		if gw := firstUsableIPv4(cfg.Network.LAN.CIDR); gw != "" {
+			if ip := net.ParseIP(gw); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+	}
+	return knottls.BuildLeafSubject(cfg.Device.Name, nil, ips)
+}
+
+// shouldRedirectHTTPS is true when the daemon should 301 plain
+// HTTP → HTTPS. Stays off in setup role (the wizard wants to be
+// reachable on plain HTTP, before the user has installed the root
+// CA) and in dev mode.
+func shouldRedirectHTTPS(cfg config.Config, devMode bool, tlsEnabled bool) bool {
+	if devMode || !tlsEnabled {
+		return false
+	}
+	return cfg.Role != config.RoleSetup
 }
 
 // dnsListenForRole derives the address knotd's DNS resolver should
@@ -154,11 +183,14 @@ var Version = "0.0.0-dev"
 
 func main() {
 	var (
-		showVersion = flag.Bool("version", false, "print version and exit")
-		dev         = flag.Bool("dev", false, "run in dev mode with mock network backend")
-		configPath  = flag.String("config", "/etc/knot/config.yaml", "path to configuration file")
-		listenAddr  = flag.String("listen", ":80", "HTTP listen address")
-		pluginsDir  = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
+		showVersion   = flag.Bool("version", false, "print version and exit")
+		dev           = flag.Bool("dev", false, "run in dev mode with mock network backend")
+		configPath    = flag.String("config", "/etc/knot/config.yaml", "path to configuration file")
+		listenAddr    = flag.String("listen", ":80", "HTTP listen address (empty disables)")
+		tlsListenAddr = flag.String("tls-listen", ":443", "HTTPS listen address (empty disables)")
+		tlsDir        = flag.String("tls-dir", "/etc/knot/tls", "directory holding the device root CA + leaf cert")
+		noTLS         = flag.Bool("no-tls", false, "disable TLS entirely (dev / debug)")
+		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 	)
 	flag.Parse()
 
@@ -206,6 +238,30 @@ func main() {
 	// reports a state consistent with what's on disk.
 	if err := backend.Apply(ctx, cfg); err != nil {
 		logger.Fatalf("initial apply: %v", err)
+	}
+
+	// TLS materials: device-local PKI for the HTTPS listener.
+	// Generated on first boot, persisted, re-issued automatically
+	// when the LAN gateway IP changes (e.g. role transition). Skipped
+	// entirely in -dev or with -no-tls so a developer running on a
+	// laptop doesn't need root for :443.
+	var tlsMaterials *knottls.Materials
+	tlsActive := !*dev && !*noTLS && *tlsListenAddr != ""
+	if tlsActive {
+		m, err := knottls.Open(knottls.Options{
+			Dir:     *tlsDir,
+			Subject: leafSubjectFor(cfg),
+		})
+		if err != nil {
+			logger.Printf("tls: %v — falling back to HTTP only", err)
+			tlsActive = false
+		} else {
+			tlsMaterials = m
+			snap := m.Snapshot()
+			logger.Printf("tls: leaf %s expires %s, root %s expires %s",
+				snap.LeafFingerprint[:23], snap.LeafNotAfter.Format("2006-01-02"),
+				snap.RootFingerprint[:23], snap.RootNotAfter.Format("2006-01-02"))
+		}
 	}
 
 	// Device registry: tracks LAN devices via dnsmasq leases + a YAML
@@ -319,6 +375,11 @@ func main() {
 	apiSrv.SetDeviceRegistry(devices)
 	apiSrv.SetProfileRegistry(profiles)
 	apiSrv.SetDNSServices(dnsLog, dnsBlocklists, dnsDownloader)
+	if tlsMaterials != nil {
+		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
+			return leafSubjectFor(apiSrv.Snapshot())
+		})
+	}
 	// SchedulerKick lets the API trigger an immediate scheduler tick
 	// after a device's profile or a profile's schedule changes.
 	apiSrv.SetSchedulerKick(func() {
@@ -328,26 +389,45 @@ func main() {
 	// completion), update the DNS resolver's listen address to
 	// match the new role. Goes through SetListen which is
 	// idempotent for unchanged addresses.
-	apiSrv.SetOnConfigApplied(func(applied config.Config) {
-		dnsServer.SetListen(dnsListenForRole(applied, *dev))
-		// Trigger an immediate refresh of cached blocklists when
-		// transitioning into wifi-extender so the device gets ad-block
-		// from the first query.
-		if applied.Role == config.RoleWiFiExtender {
-			dnsDownloader.RefreshNow()
-		}
-	})
+	// onConfigApplied is wired in at the bottom (after we have the
+	// http server) because it needs to flip the HTTPS redirect on
+	// role transitions in the same callback as the DNS+TLS updates.
 	// Production mode unlocks the system endpoints (reboot/shutdown/
 	// update) that would be destructive in dev. Tied to the absence
 	// of -dev because that's the same condition that picks the real
 	// LinuxBackend.
 	apiSrv.SetProductionMode(!*dev)
 
-	srv := httpserver.New(httpserver.Options{
+	srvOpts := httpserver.Options{
 		Addr:   *listenAddr,
 		Logger: logger,
-	})
+	}
+	if tlsActive {
+		srvOpts.TLSAddr = *tlsListenAddr
+		srvOpts.TLS = tlsMaterials
+	}
+	srv := httpserver.New(srvOpts)
 	srv.Mount("/api", apiSrv.Handler())
+	srv.SetRedirectHTTPS(shouldRedirectHTTPS(cfg, *dev, tlsActive))
+
+	// Single config-applied callback wires every effect a role
+	// transition has to ripple through:
+	//   - DNS resolver listen address (port 53 ownership)
+	//   - blocklist refresh on entering extender mode
+	//   - TLS leaf re-issue if the LAN gateway moved
+	//   - HTTPS redirect on/off (setup → wifi-* flips it on)
+	apiSrv.SetOnConfigApplied(func(applied config.Config) {
+		dnsServer.SetListen(dnsListenForRole(applied, *dev))
+		if applied.Role == config.RoleWiFiExtender {
+			dnsDownloader.RefreshNow()
+		}
+		if tlsMaterials != nil {
+			if err := tlsMaterials.Regenerate(leafSubjectFor(applied)); err != nil {
+				logger.Printf("tls: regenerate after apply: %v", err)
+			}
+		}
+		srv.SetRedirectHTTPS(shouldRedirectHTTPS(applied, *dev, tlsActive))
+	})
 
 	if err := srv.Start(ctx); err != nil {
 		logger.Fatalf("server error: %v", err)

@@ -25,6 +25,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
+	knottls "github.com/knot-os/knot-os/core/internal/tls"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -42,6 +43,8 @@ type Server struct {
 	devices         *deviceregistry.Registry
 	profiles        *profile.Registry
 	dns             *dnsServices
+	tls             *knottls.Materials
+	tlsSubject      func() knottls.LeafSubject
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -115,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountDevices(r)
 		s.MountProfiles(r)
 		s.MountDNS(r)
+		s.MountTLS(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
