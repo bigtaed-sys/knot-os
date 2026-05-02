@@ -74,6 +74,11 @@ type Options struct {
 	Devices DeviceLookup
 	// Log receives one QueryEvent per query. Pass nil to discard.
 	Log QueryLog
+	// Cache, when non-nil, is consulted before forwarding. Allowed
+	// (NOERROR-with-answers, NXDOMAIN) responses are stored back.
+	// Blocklist NXDOMAINs do not enter the cache because the answer
+	// depends on the source's profile.
+	Cache *Cache
 	// Logger receives operational messages (start/stop, errors).
 	Logger *log.Logger
 }
@@ -245,12 +250,24 @@ func (s *Server) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 		return
 	}
 
+	if cached, ok := s.opts.Cache.Get(r); ok {
+		if err := w.WriteMsg(cached); err != nil {
+			s.opts.Logger.Printf("dns: write cached reply: %v", err)
+		}
+		s.opts.Log.Append(QueryEvent{
+			When: time.Now(), SrcMAC: mac, SrcIP: srcIP.String(),
+			QName: qname, QType: mdns.TypeToString[q.Qtype],
+		})
+		return
+	}
+
 	resp, err := s.forward(r)
 	if err != nil {
 		s.opts.Logger.Printf("dns: forward %s from %s:%d: %v", qname, srcIP, srcPort, err)
 		s.replyServFail(w, r)
 		return
 	}
+	s.opts.Cache.Set(r, resp)
 	if err := w.WriteMsg(resp); err != nil {
 		s.opts.Logger.Printf("dns: write reply: %v", err)
 	}

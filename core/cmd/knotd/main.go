@@ -268,6 +268,13 @@ func main() {
 	})
 	go dnsDownloader.Run(ctx)
 
+	// In-memory query log + response cache. The log feeds the
+	// /api/dns/{stats,queries} endpoints (M11d) and the Protection
+	// UI in M12; the cache deduplicates upstream traffic and shrinks
+	// the per-query latency on a busy LAN.
+	dnsLog := knotdns.NewRingLog(0)
+	dnsCache := knotdns.NewCache(knotdns.CacheOptions{})
+
 	// DNS resolver: started always, but the listen address is
 	// derived from the current role (empty in setup mode where
 	// dnsmasq's own DNS catch-all owns port 53; gateway:53 in
@@ -276,6 +283,8 @@ func main() {
 		Listen:     dnsListenForRole(cfg, *dev),
 		Blocklists: dnsBlocklists,
 		Devices:    dnsDeviceLookup{devices: devices, profiles: profiles},
+		Log:        dnsLog,
+		Cache:      dnsCache,
 		Logger:     logger,
 	})
 	go func() {
@@ -309,6 +318,7 @@ func main() {
 	})
 	apiSrv.SetDeviceRegistry(devices)
 	apiSrv.SetProfileRegistry(profiles)
+	apiSrv.SetDNSServices(dnsLog, dnsBlocklists, dnsDownloader)
 	// SchedulerKick lets the API trigger an immediate scheduler tick
 	// after a device's profile or a profile's schedule changes.
 	apiSrv.SetSchedulerKick(func() {

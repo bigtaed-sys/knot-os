@@ -41,6 +41,7 @@ type Server struct {
 	plugins         *plugin.Registry
 	devices         *deviceregistry.Registry
 	profiles        *profile.Registry
+	dns             *dnsServices
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -113,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountSystem(r)
 		s.MountDevices(r)
 		s.MountProfiles(r)
+		s.MountDNS(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
