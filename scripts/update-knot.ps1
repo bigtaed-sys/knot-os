@@ -119,7 +119,26 @@ $port = New-Object System.IO.Ports.SerialPort $Serial, $BaudRate, None, 8, One
 $port.NewLine = "`n"
 $port.ReadTimeout = 30000
 $port.WriteTimeout = 30000
-$port.Open()
+try {
+    $port.Open()
+} catch [System.UnauthorizedAccessException] {
+    Write-Host ''
+    Write-Host "Cannot open ${Serial}: another program is holding it." -ForegroundColor Red
+    Write-Host 'Close every serial terminal (PuTTY, SecureCRT, Termius, screen,' -ForegroundColor Yellow
+    Write-Host "  the Arduino IDE Serial Monitor, ...) that has $Serial open, then re-run this script." -ForegroundColor Yellow
+    Write-Host '' -ForegroundColor Yellow
+    Write-Host 'On the Pi side knot-update-receive should already be running and waiting' -ForegroundColor Yellow
+    Write-Host '  for input on its end of the same UART. You only need the Windows-side' -ForegroundColor Yellow
+    Write-Host '  port closed; the Pi-side process keeps reading once you re-open it from here.' -ForegroundColor Yellow
+    throw
+} catch [System.IO.IOException] {
+    Write-Host ''
+    Write-Host "Cannot open ${Serial}: port not present." -ForegroundColor Red
+    Write-Host '  Run `Get-WmiObject Win32_SerialPort | Select-Object Name, DeviceID`' -ForegroundColor Yellow
+    Write-Host '  to see what serial ports Windows currently sees, and pass the right' -ForegroundColor Yellow
+    Write-Host '  one via -Serial.' -ForegroundColor Yellow
+    throw
+}
 try {
     # Magic header so the receiver knows we're pushing a binary now.
     $port.WriteLine('KNOTUPDATE-BEGIN')
