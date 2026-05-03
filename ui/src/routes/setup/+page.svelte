@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { _ } from 'svelte-i18n';
 	import { goto } from '$app/navigation';
-	import { apiGet, apiPost, ApiError } from '$lib/api';
+	import { apiGet, apiPost, ApiError, ApiTimeoutError } from '$lib/api';
 	import type { ScanResponse, ScannedNetwork } from '$lib/types';
 
 	type Role = 'wifi-extender' | 'wifi-router';
@@ -28,13 +28,27 @@
 	};
 	let cap = $state<CapabilityReport | null>(null);
 	let capLoading = $state(true);
+	let capError = $state<string | null>(null);
 
 	async function loadCapability() {
 		capLoading = true;
+		capError = null;
 		try {
-			cap = await apiGet<CapabilityReport>('/setup/capability');
-		} catch {
+			// Tight timeout: capability is a read of /sys/class/net,
+			// which is microseconds in real life. 8s gives plenty of
+			// margin if the LAN is briefly congested but lets the
+			// user re-probe quickly when something is genuinely wedged
+			// instead of staring at an indefinite spinner.
+			cap = await apiGet<CapabilityReport>('/setup/capability', { timeoutMs: 8000 });
+		} catch (e) {
+			// Always fall back to "nothing detected" so the wizard can
+			// proceed in extender-only mode regardless of the failure.
 			cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
+			if (e instanceof ApiTimeoutError) {
+				capError = $_('setup.detect_timeout');
+			} else if (e instanceof Error) {
+				capError = e.message;
+			}
 		} finally {
 			capLoading = false;
 		}
@@ -322,6 +336,11 @@
 						</div>
 						{#if capLoading}
 							<p class="text-xs text-zinc-500 dark:text-zinc-400">{$_('setup.detect_loading')}</p>
+						{:else if capError}
+							<p class="text-xs text-rose-600 dark:text-rose-400">
+								<i class="bi bi-exclamation-triangle"></i>
+								{capError}
+							</p>
 						{:else if cap}
 							{#if cap.pi_model_string}
 								<p class="text-xs text-zinc-500 dark:text-zinc-400">

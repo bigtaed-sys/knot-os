@@ -158,6 +158,7 @@
 		"detect_rescan": "Re-probe",
 		"detect_router_available": "Both extender and full-router options are available. You'll pick the role on the next step.",
 		"detect_no_eth": "No USB-Ethernet adapter detected. If you want full-router mode, plug one in and click \"Re-probe\". Without one, KnotOS will run as a Wi-Fi extender.",
+		"detect_timeout": "Hardware probe didn't respond. You can continue — KnotOS will run as a Wi-Fi extender — or click \"Re-probe\" in a few seconds.",
 		"role_section_title": "What are you doing?",
 		"role_section_subtitle": "KnotOS can run as a Wi-Fi repeater or as a full router with wired internet — we detected a USB-Ethernet adapter, so both options are available.",
 		"role_detected": "Detected adapter: {adapter} ({iface})",

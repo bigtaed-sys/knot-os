@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -33,27 +34,45 @@ func (s *Server) MountSetup(r chi.Router) {
 // Each call runs the probe live — no caching, so a user who
 // plugs in the dongle mid-wizard can hit "rescan" and see it
 // without restarting knotd.
+//
+// The probe runs in a separate goroutine with a 5-second deadline.
+// In practice the probe is microseconds (just sysfs reads); the
+// deadline exists so the API can never wedge if the kernel's sysfs
+// stalls during USB hotplug, which the user has actually hit
+// in the field — without the deadline the wizard's spinner stays
+// up indefinitely and the user can't even get to the
+// extender-only fallback.
 func (s *Server) handleSetupCapability(w http.ResponseWriter, r *http.Request) {
-	rep, err := capability.Probe{}.Run()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "capability_failed", err.Error())
-		return
+	start := time.Now()
+
+	type result struct {
+		rep capability.Report
+		err error
 	}
-	// Best-effort log so an operator with serial / journalctl access
-	// can see exactly what was detected, which is faster to debug
-	// than "the wizard didn't show the role step on my Pi".
-	if r != nil {
-		// Use the request context's logger if present in the future;
-		// for now, log via the standard logger which is wired to
-		// stderr in main.go.
-		log.Printf("setup/capability: pi=%q router_capable=%v eth=%d",
-			rep.Pi, rep.RouterCapable, len(rep.Eth))
-		for _, a := range rep.Eth {
+	ch := make(chan result, 1)
+	go func() {
+		rep, err := capability.Probe{}.Run()
+		ch <- result{rep, err}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			writeError(w, http.StatusInternalServerError, "capability_failed", res.err.Error())
+			return
+		}
+		log.Printf("setup/capability: pi=%q router_capable=%v eth=%d (%v)",
+			res.rep.Pi, res.rep.RouterCapable, len(res.rep.Eth), time.Since(start))
+		for _, a := range res.rep.Eth {
 			log.Printf("setup/capability: eth %s driver=%s usb=%s:%s model=%q",
 				a.Interface, a.Driver, a.USBVendor, a.USBProduct, a.Model)
 		}
+		writeJSON(w, http.StatusOK, res.rep)
+	case <-time.After(5 * time.Second):
+		log.Printf("setup/capability: probe timed out after 5s — sysfs read stuck")
+		writeError(w, http.StatusServiceUnavailable, "capability_timeout",
+			"hardware probe did not complete in 5s")
 	}
-	writeJSON(w, http.StatusOK, rep)
 }
 
 // requireSetupRole gates setup-only endpoints. Returns 410 Gone when
@@ -200,6 +219,23 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	s.cfg = finished
 	s.mu.Unlock()
 	s.fireConfigApplied(finished)
+
+	// Wipe the device registry: every entry collected during setup
+	// came from a phone that briefly joined KnotOS-setup-XXXX to
+	// run the wizard. iOS/Android use a per-SSID randomized MAC,
+	// so the SAME physical phone reconnects to the production
+	// SSID under a different MAC — leaving the setup-time MAC as
+	// a permanent ghost in the device list. Clearing here is
+	// exactly what the user expects: "the moment I finish setup,
+	// my device list shows only what's connected to my real Wi-Fi".
+	if s.devices != nil {
+		if err := s.devices.Reset(); err != nil {
+			// Non-fatal — just log; the in-memory state is wiped
+			// regardless and the periodic flusher will re-create
+			// a clean store file on the next change.
+			log.Printf("setup/complete: device registry reset: %v", err)
+		}
+	}
 
 	// Issue a session immediately — the user is implicitly logged in
 	// with the password they just set. They won't be redirected to a

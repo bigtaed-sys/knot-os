@@ -124,6 +124,29 @@ func (r *Registry) SetProfileID(mac, id string) (Device, error) {
 	return r.Update(mac, func(d *Device) { d.ProfileID = id })
 }
 
+// Reset wipes the entire registry — both the in-memory map and
+// the on-disk YAML store. Used at setup-completion time: every
+// device the registry saw before the wizard finished was a
+// transient client that briefly joined `KnotOS-setup-XXXX` to
+// hit the captive portal. Most modern phones use a fresh
+// randomized MAC for that ephemeral SSID and another for the
+// final broadcast SSID, so those setup-time entries are stale
+// duplicates by definition.
+//
+// On-disk failure is non-fatal: the in-memory state is wiped
+// regardless, the next periodic flush re-creates a clean file,
+// and the user simply doesn't see ghost devices in the UI.
+func (r *Registry) Reset() error {
+	r.mu.Lock()
+	r.devices = make(map[string]*Device)
+	r.dirty = true
+	r.mu.Unlock()
+	if err := os.Remove(r.storeFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", r.storeFile, err)
+	}
+	return nil
+}
+
 // Forget removes a device from the registry. Used by the UI to clean
 // up stale entries that won't come back — typically duplicates from
 // iOS/Android private MAC randomization, where a single physical
