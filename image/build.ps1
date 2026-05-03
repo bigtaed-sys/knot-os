@@ -166,29 +166,45 @@ if ($missing) {
 # know to route execs through /usr/bin/qemu-aarch64-static.
 # WSL2 loses these registrations on every `wsl --shutdown`, so even
 # a previously-working machine can hit this after a reboot.
-$binfmtCheck = & wsl.exe -d $Distro -e bash -lc 'test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && head -1 /proc/sys/fs/binfmt_misc/qemu-aarch64 | grep -q enabled && echo OK || echo MISSING'
-if (($binfmtCheck | Out-String).Trim() -ne 'OK') {
+function Test-Binfmt {
+    $check = & wsl.exe -d $Distro -e bash -lc 'test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && head -1 /proc/sys/fs/binfmt_misc/qemu-aarch64 | grep -q enabled && echo OK || echo MISSING'
+    return ($check | Out-String).Trim() -eq 'OK'
+}
+
+if (-not (Test-Binfmt)) {
     Write-Host ''
     Write-Host 'binfmt_misc for qemu-aarch64 is not registered in WSL.' -ForegroundColor Yellow
-    Write-Host '  This usually means WSL was restarted since qemu-user-static was set up.'
+    Write-Host '  This usually means WSL was restarted since qemu-user-static was set up,'
+    Write-Host '  or WSL boots without systemd so the binfmt-support service never ran.'
     Write-Host '  Re-registering now…'
-    # Try the systemd path first (Ubuntu 22.04+ with systemd-on-WSL),
-    # fall back to update-binfmts which works on every layout.
-    & wsl.exe -d $Distro -e bash -lc 'sudo systemctl restart systemd-binfmt 2>/dev/null || sudo update-binfmts --enable qemu-aarch64'
-    if ($LASTEXITCODE -ne 0) {
+
+    # Strategy chain (each attempt only fires if the previous didn't fix it):
+    #   1. systemctl restart systemd-binfmt            (systemd-on-WSL)
+    #   2. update-binfmts --enable qemu-aarch64        (any sysv-friendly layout)
+    #   3. binfmt_misc /register direct write          (works EVERYWHERE,
+    #                                                   including non-systemd
+    #                                                   WSL where 1+2 both
+    #                                                   fail silently).
+    # Format string is the canonical aarch64 ELF magic / mask. Single-quoted
+    # heredoc on the bash side so PowerShell doesn't try to interpret \xNN
+    # escapes as its own.
+    $regCmds = @"
+sudo systemctl restart systemd-binfmt 2>/dev/null && exit 0
+sudo update-binfmts --enable qemu-aarch64 2>/dev/null && exit 0
+test -x /usr/bin/qemu-aarch64-static || exit 7
+sudo bash -c 'echo ":qemu-aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\xfc\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:OCF" > /proc/sys/fs/binfmt_misc/register'
+"@
+    & wsl.exe -d $Distro -e bash -lc $regCmds | Out-Null
+
+    if (-not (Test-Binfmt)) {
         Write-Host ''
-        Write-Host 'Could not register binfmt automatically. Run this in WSL and try again:' -ForegroundColor Red
-        Write-Host '    sudo apt-get install --reinstall qemu-user-static binfmt-support' -ForegroundColor Yellow
-        exit 1
-    }
-    # Recheck.
-    $binfmtCheck = & wsl.exe -d $Distro -e bash -lc 'test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && head -1 /proc/sys/fs/binfmt_misc/qemu-aarch64 | grep -q enabled && echo OK || echo MISSING'
-    if (($binfmtCheck | Out-String).Trim() -ne 'OK') {
-        Write-Host ''
-        Write-Host 'Still no binfmt for qemu-aarch64 after retrying.' -ForegroundColor Red
+        Write-Host 'Still no binfmt for qemu-aarch64 after auto-fix.' -ForegroundColor Red
         Write-Host 'Run inside WSL:' -ForegroundColor Yellow
         Write-Host '    sudo apt-get install --reinstall qemu-user-static binfmt-support'
-        Write-Host '    sudo systemctl restart systemd-binfmt'
+        Write-Host ''
+        Write-Host 'For a permanent fix, enable systemd in WSL:' -ForegroundColor Yellow
+        Write-Host '    sudo nano /etc/wsl.conf      # add:  [boot]\n                                 systemd=true'
+        Write-Host '    exit && wsl --shutdown        # then re-open WSL'
         exit 1
     }
     Write-Host '  binfmt registered.' -ForegroundColor Green
