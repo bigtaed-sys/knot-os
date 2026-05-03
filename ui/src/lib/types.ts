@@ -162,3 +162,22 @@ export interface TLSInfo {
 	leaf_dns_names?: string[];
 	leaf_ips?: string[];
 }
+
+export interface ReleaseInfo {
+	tag: string;
+	name?: string;
+	published_at: string;
+	notes?: string;
+	binary_url: string;
+	signature_url: string;
+	binary_size: number;
+	has_signature: boolean;
+}
+
+export interface UpdateCheckResult {
+	current_version: string;
+	latest_version: string;
+	update_available: boolean;
+	signing_enabled: boolean;
+	latest?: ReleaseInfo;
+}

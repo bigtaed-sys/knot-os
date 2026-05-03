@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/knot-os/knot-os/core/internal/update"
 )
 
 // MountSystem registers /system/* endpoints (auth-required) for power
@@ -22,8 +24,23 @@ import (
 func (s *Server) MountSystem(r chi.Router) {
 	r.Post("/system/reboot", s.handleReboot)
 	r.Post("/system/shutdown", s.handleShutdown)
+	// /system/update accepts a raw octet-stream upload of a new
+	// knotd binary. Kept for compatibility with scripts/update-knot.ps1
+	// (manual dev pushes); does not enforce a signature, so it
+	// remains gated by the auth cookie + production-mode flag.
 	r.Post("/system/update", s.handleUpdate)
+	// /system/update/check + /apply are the new GitHub-driven
+	// auto-update path: signed binaries fetched from the latest
+	// release, verified with the embedded Ed25519 release key
+	// before install.
+	r.Get("/system/update/check", s.handleUpdateCheck)
+	r.Post("/system/update/apply", s.handleUpdateApply)
 }
+
+// SetUpdateManager wires the GitHub-driven update path into the API.
+// Pass nil (or skip the call) to disable the /system/update/check
+// and /apply endpoints — they then respond 503.
+func (s *Server) SetUpdateManager(m *update.Manager) { s.updater = m }
 
 // SetProductionMode flips the gate that allows /system/{reboot,shutdown}
 // to actually execute. Off by default; main turns it on when running
@@ -137,6 +154,58 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		_ = exec.Command("systemctl", "restart", "knotd").Run()
+	}()
+}
+
+// handleUpdateCheck queries GitHub Releases for the latest knotd
+// build and reports whether it's newer than the running version.
+// Cheap, idempotent — the wizard / System page can poll it on a
+// timer if desired.
+func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if s.updater == nil {
+		writeError(w, http.StatusServiceUnavailable, "update_disabled", "auto-update not configured")
+		return
+	}
+	res, err := s.updater.CheckLatest(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "github_unreachable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleUpdateApply downloads the latest release, verifies it with
+// the embedded Ed25519 key, atomically replaces the on-disk binary,
+// and restarts knotd. Synchronous: blocks until install is complete
+// (a few seconds; longest part is the GitHub download). The actual
+// systemctl restart happens in a goroutine after the response
+// flushes so the user sees "ok" before the service dies.
+func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if s.updater == nil {
+		writeError(w, http.StatusServiceUnavailable, "update_disabled", "auto-update not configured")
+		return
+	}
+	if !s.production {
+		writeError(w, http.StatusServiceUnavailable, "dev_mode", "auto-update disabled in dev mode")
+		return
+	}
+	tag, err := s.updater.ApplyLatest(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":      true,
+		"version": tag,
+	})
+	// Restart in a goroutine so the response fully flushes first.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if err := s.updater.Restart(); err != nil {
+			// Best-effort log; we have no other channel back to the
+			// user since the response already returned.
+			fmt.Fprintf(os.Stderr, "update: restart after apply: %v\n", err)
+		}
 	}()
 }
 

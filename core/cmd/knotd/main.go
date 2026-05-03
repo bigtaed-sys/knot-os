@@ -26,6 +26,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/scheduler"
 	"github.com/knot-os/knot-os/core/internal/secrets"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
+	"github.com/knot-os/knot-os/core/internal/update"
 )
 
 // schedulerDevices adapts deviceregistry.Registry to the scheduler's
@@ -417,6 +418,22 @@ func main() {
 		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
 			return leafSubjectFor(apiSrv.Snapshot())
 		})
+	}
+	// Auto-update path: query GitHub Releases for a newer knotd
+	// binary, verify the detached Ed25519 signature against the
+	// release public key baked in at build time, atomically replace
+	// /usr/local/bin/knotd, restart the service. Skipped in dev
+	// because the install path needs root + systemctl.
+	if !*dev {
+		updater, err := update.New(update.Options{
+			CurrentVersion: Version,
+			Logger:         logger,
+		})
+		if err != nil {
+			logger.Printf("update: %v — auto-update endpoints disabled", err)
+		} else {
+			apiSrv.SetUpdateManager(updater)
+		}
 	}
 	// SchedulerKick lets the API trigger an immediate scheduler tick
 	// after a device's profile or a profile's schedule changes.

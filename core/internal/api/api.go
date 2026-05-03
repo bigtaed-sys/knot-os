@@ -26,6 +26,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
+	"github.com/knot-os/knot-os/core/internal/update"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -46,6 +47,7 @@ type Server struct {
 	tls             *knottls.Materials
 	tlsSubject      func() knottls.LeafSubject
 	sealer          config.Sealer
+	updater         *update.Manager
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool

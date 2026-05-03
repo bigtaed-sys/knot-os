@@ -64,26 +64,34 @@ export async function apiGet<T>(path: string, opts: RequestOpts = {}): Promise<T
 	return res.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-	const res = await fetch(`${API_BASE}${path}`, {
-		method: 'POST',
-		credentials: 'same-origin',
-		headers: { 'content-type': 'application/json' },
-		body: body === undefined ? undefined : JSON.stringify(body)
-	});
+export async function apiPost<T>(path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+	const res = await doFetch(
+		path,
+		{
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'content-type': 'application/json' },
+			body: body === undefined ? undefined : JSON.stringify(body)
+		},
+		opts
+	);
 	if (!res.ok) {
 		throw new ApiError(`POST ${path} → ${res.status}`, res.status, await safeJson(res));
 	}
 	return res.json() as Promise<T>;
 }
 
-export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
-	const res = await fetch(`${API_BASE}${path}`, {
-		method: 'PUT',
-		credentials: 'same-origin',
-		headers: { 'content-type': 'application/json' },
-		body: body === undefined ? undefined : JSON.stringify(body)
-	});
+export async function apiPut<T>(path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+	const res = await doFetch(
+		path,
+		{
+			method: 'PUT',
+			credentials: 'same-origin',
+			headers: { 'content-type': 'application/json' },
+			body: body === undefined ? undefined : JSON.stringify(body)
+		},
+		opts
+	);
 	if (!res.ok) {
 		throw new ApiError(`PUT ${path} → ${res.status}`, res.status, await safeJson(res));
 	}

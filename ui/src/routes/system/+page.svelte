@@ -2,8 +2,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, apiPost, ApiError, API_BASE } from '$lib/api';
-	import type { SystemStatus, TLSInfo } from '$lib/types';
+	import { apiGet, apiPost, ApiError, ApiTimeoutError, API_BASE } from '$lib/api';
+	import type { SystemStatus, TLSInfo, UpdateCheckResult } from '$lib/types';
 
 	let status = $state<SystemStatus | null>(null);
 	let tls = $state<TLSInfo | null>(null);
@@ -12,6 +12,13 @@
 	let busy = $state<string | null>(null);
 	let updateMsg = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// GitHub auto-update state.
+	let upd = $state<UpdateCheckResult | null>(null);
+	let updAvailable = $state(true);
+	let updChecking = $state(false);
+	let updApplying = $state(false);
+	let updError = $state<string | null>(null);
 
 	async function load() {
 		try {
@@ -26,6 +33,61 @@
 			if (e instanceof ApiError && e.status === 503) {
 				tlsAvailable = false;
 			}
+		}
+		// Don't auto-check for updates on mount: that hits GitHub and
+		// we don't want the System page to take 30 seconds to load
+		// just because the device's uplink is slow. The user clicks
+		// "Проверить" / "Check" explicitly. Endpoint-not-configured
+		// (503) gets surfaced from the click handler instead of
+		// pre-emptively here.
+	}
+
+	async function checkUpdate() {
+		updChecking = true;
+		updError = null;
+		try {
+			// 30s timeout: GitHub API + the network path through whatever
+			// uplink the device has. Plenty of margin without being so
+			// long that a wedged DNS server traps the user forever.
+			upd = await apiGet<UpdateCheckResult>('/system/update/check', { timeoutMs: 30000 });
+			updAvailable = true;
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 503) {
+				updAvailable = false;
+			} else if (e instanceof ApiTimeoutError) {
+				updError = $_('updates.error_timeout');
+			} else if (e instanceof ApiError && e.status === 502) {
+				updError = $_('updates.error_github');
+			} else if (e instanceof Error) {
+				updError = e.message;
+			}
+		} finally {
+			updChecking = false;
+		}
+	}
+
+	async function applyUpdate() {
+		if (!upd?.update_available) return;
+		const target = upd.latest_version;
+		if (!confirm($_('updates.apply_confirm', { values: { version: target } }))) return;
+		updApplying = true;
+		updError = null;
+		try {
+			// 5 min timeout: download + verify + atomic install +
+			// service restart. Almost all of that is the binary
+			// download itself; sub-second on a fast LAN, long minutes
+			// over a phone hotspot.
+			await apiPost('/system/update/apply', undefined, { timeoutMs: 5 * 60 * 1000 });
+			updateMsg = { kind: 'ok', text: $_('updates.apply_success', { values: { version: target } }) };
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				updError = body?.error?.message ?? e.message;
+			} else if (e instanceof Error) {
+				updError = e.message;
+			}
+		} finally {
+			updApplying = false;
 		}
 	}
 
@@ -187,35 +249,122 @@
 		</section>
 	{/if}
 
-	<!-- Update -->
+	<!-- Updates: GitHub auto + manual upload -->
 	<section class="surface p-5">
 		<h2 class="font-semibold mb-1 flex items-center gap-2">
 			<i class="bi bi-arrow-up-circle text-brand-500"></i>
-			{$_('system.update_section')}
+			{$_('updates.section')}
 		</h2>
-		<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-3">
-			{$_('system.update_subtitle')}
+		<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+			{$_('updates.subtitle')}
 		</p>
-		<input
-			bind:this={fileInput}
-			type="file"
-			accept=""
-			onchange={uploadUpdate}
-			class="hidden"
-		/>
-		<button
-			class="btn-primary"
-			disabled={busy === 'update'}
-			onclick={() => fileInput?.click()}
-		>
-			{#if busy === 'update'}
-				<span class="spinner"></span>
-				{$_('system.update_uploading')}
-			{:else}
-				<i class="bi bi-upload"></i>
-				{$_('system.update_choose')}
+
+		{#if !updAvailable}
+			<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+				<i class="bi bi-info-circle"></i>
+				{$_('updates.disabled')}
+			</p>
+		{:else}
+			<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm mb-4">
+				<dt class="text-zinc-500 dark:text-zinc-400">{$_('updates.current_version')}</dt>
+				<dd class="font-mono">{status?.version ?? ''}</dd>
+				{#if upd}
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('updates.latest_version')}</dt>
+					<dd class="font-mono">
+						{upd.latest_version}
+						{#if upd.update_available}
+							<span class="badge badge-ok ml-2">
+								<i class="bi bi-arrow-up"></i>
+								{$_('updates.available')}
+							</span>
+						{:else}
+							<span class="badge badge-neutral ml-2">{$_('updates.up_to_date')}</span>
+						{/if}
+					</dd>
+					{#if upd.latest?.published_at}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('updates.published')}</dt>
+						<dd>{fmtDate(upd.latest.published_at)}</dd>
+					{/if}
+					{#if !upd.signing_enabled}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('updates.signing')}</dt>
+						<dd class="text-amber-600 dark:text-amber-400">
+							<i class="bi bi-exclamation-triangle"></i>
+							{$_('updates.signing_off')}
+						</dd>
+					{/if}
+				{/if}
+			</dl>
+
+			<div class="flex flex-wrap gap-3">
+				<button class="btn-ghost" disabled={updChecking || updApplying} onclick={checkUpdate}>
+					{#if updChecking}
+						<span class="spinner"></span>
+						{$_('updates.checking')}
+					{:else}
+						<i class="bi bi-arrow-repeat"></i>
+						{$_('updates.check')}
+					{/if}
+				</button>
+				{#if upd?.update_available}
+					<button class="btn-primary" disabled={updApplying} onclick={applyUpdate}>
+						{#if updApplying}
+							<span class="spinner"></span>
+							{$_('updates.applying')}
+						{:else}
+							<i class="bi bi-cloud-download"></i>
+							{$_('updates.install', { values: { version: upd.latest_version } })}
+						{/if}
+					</button>
+				{/if}
+			</div>
+
+			{#if updError}
+				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+					<span>{updError}</span>
+				</div>
 			{/if}
-		</button>
+
+			{#if upd?.latest?.notes}
+				<details class="mt-4 text-sm">
+					<summary class="cursor-pointer text-zinc-600 dark:text-zinc-300 hover:text-brand-500">
+						{$_('updates.release_notes')}
+					</summary>
+					<pre class="mt-2 p-3 rounded-lg bg-zinc-100 dark:bg-zinc-800/60 text-xs whitespace-pre-wrap font-mono overflow-x-auto">{upd.latest.notes}</pre>
+				</details>
+			{/if}
+		{/if}
+
+		<!-- Manual upload (developer path) -->
+		<details class="mt-5 text-sm">
+			<summary class="cursor-pointer text-zinc-500 dark:text-zinc-400 hover:text-brand-500">
+				{$_('updates.manual_section')}
+			</summary>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-2 mb-3">
+				{$_('updates.manual_help')}
+			</p>
+			<input
+				bind:this={fileInput}
+				type="file"
+				accept=""
+				onchange={uploadUpdate}
+				class="hidden"
+			/>
+			<button
+				class="btn-ghost"
+				disabled={busy === 'update'}
+				onclick={() => fileInput?.click()}
+			>
+				{#if busy === 'update'}
+					<span class="spinner"></span>
+					{$_('system.update_uploading')}
+				{:else}
+					<i class="bi bi-upload"></i>
+					{$_('system.update_choose')}
+				{/if}
+			</button>
+		</details>
+
 		{#if updateMsg}
 			<div
 				class="mt-3 flex items-start gap-2 p-3 rounded-lg text-sm
