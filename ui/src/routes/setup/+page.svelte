@@ -27,6 +27,18 @@
 		router_capable: boolean;
 	};
 	let cap = $state<CapabilityReport | null>(null);
+	let capLoading = $state(true);
+
+	async function loadCapability() {
+		capLoading = true;
+		try {
+			cap = await apiGet<CapabilityReport>('/setup/capability');
+		} catch {
+			cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
+		} finally {
+			capLoading = false;
+		}
+	}
 
 	// Step 1 — device + admin
 	let deviceName = $state('knot');
@@ -186,13 +198,7 @@
 		{ n: 5, key: 'setup.step_review', icon: 'bi-check2-circle' }
 	]);
 
-	onMount(async () => {
-		try {
-			cap = await apiGet<CapabilityReport>('/setup/capability');
-		} catch {
-			cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
-		}
-	});
+	onMount(loadCapability);
 
 	const channelOptions = [1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13];
 </script>
@@ -290,9 +296,82 @@
 							{step1Error}
 						</p>
 					{/if}
+
+					<!-- Hardware probe summary so the user can see if the
+					     dongle was detected before they leave step 1. -->
+					<div class="surface-muted p-3 rounded-lg text-sm space-y-2">
+						<div class="flex items-center justify-between gap-2 flex-wrap">
+							<div class="font-medium flex items-center gap-2">
+								<i class="bi bi-cpu text-brand-500"></i>
+								{$_('setup.detected_section')}
+							</div>
+							<button
+								type="button"
+								class="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
+								onclick={loadCapability}
+								disabled={capLoading}
+							>
+								{#if capLoading}
+									<span class="spinner inline-block align-middle"></span>
+									{$_('setup.detect_rescan')}
+								{:else}
+									<i class="bi bi-arrow-repeat"></i>
+									{$_('setup.detect_rescan')}
+								{/if}
+							</button>
+						</div>
+						{#if capLoading}
+							<p class="text-xs text-zinc-500 dark:text-zinc-400">{$_('setup.detect_loading')}</p>
+						{:else if cap}
+							{#if cap.pi_model_string}
+								<p class="text-xs text-zinc-500 dark:text-zinc-400">
+									<span class="font-mono">{cap.pi_model_string}</span>
+								</p>
+							{/if}
+							{#if cap.eth.length > 0}
+								<ul class="text-xs space-y-0.5">
+									{#each cap.eth as a}
+										<li class="flex items-center gap-2">
+											<i class="bi bi-ethernet text-emerald-500"></i>
+											<span class="font-mono">{a.interface}</span>
+											<span class="text-zinc-500 dark:text-zinc-400">— {a.model}</span>
+											{#if a.usb_vendor && a.usb_product}
+												<span class="text-zinc-400 font-mono">
+													({a.usb_vendor}:{a.usb_product})
+												</span>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+								<p class="text-xs text-emerald-700 dark:text-emerald-400">
+									{$_('setup.detect_router_available')}
+								</p>
+							{:else}
+								<p class="text-xs text-zinc-500 dark:text-zinc-400">
+									<i class="bi bi-info-circle"></i>
+									{$_('setup.detect_no_eth')}
+								</p>
+							{/if}
+						{/if}
+					</div>
 				</div>
 			{:else if step === 2}
-				<h2 class="text-lg font-semibold mb-1">{$_('setup.role_section_title')}</h2>
+				<div class="flex items-start justify-between gap-3 mb-1 flex-wrap">
+					<h2 class="text-lg font-semibold">{$_('setup.role_section_title')}</h2>
+					<button
+						type="button"
+						class="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
+						onclick={loadCapability}
+						disabled={capLoading}
+					>
+						{#if capLoading}
+							<span class="spinner inline-block align-middle"></span>
+						{:else}
+							<i class="bi bi-arrow-repeat"></i>
+						{/if}
+						{$_('setup.detect_rescan')}
+					</button>
+				</div>
 				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
 					{$_('setup.role_section_subtitle')}
 				</p>
@@ -542,7 +621,7 @@
 				<button
 					class="btn-primary"
 					onclick={next}
-					disabled={(step === 1 && !!step1Error) ||
+					disabled={(step === 1 && (!!step1Error || capLoading)) ||
 						(step === 3 && !!step3Error) ||
 						(step === 4 && !!step4Error)}
 				>

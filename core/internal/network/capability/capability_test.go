@@ -104,6 +104,52 @@ PRODUCT=ffff/aaaa/100
 	}
 }
 
+func TestProbePiZero2WOTGPath(t *testing.T) {
+	// Realistic device-link target on Pi Zero 2W: USB host controller
+	// is the SoC's OTG IP, the dongle hangs off usb1.
+	sysClassNet := makeFakeSysfs(t, map[string]struct {
+		uevent, devPath string
+	}{
+		"eth0": {
+			uevent: `DRIVER=r8152
+PRODUCT=bda/8152/2000
+INTERFACE=2
+`,
+			devPath: "devices/platform/soc/3f980000.usb/usb1/1-1/1-1:1.0",
+		},
+	})
+	rep, err := Probe{SysClassNet: sysClassNet, ModelFile: "/nonexistent"}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.RouterCapable || len(rep.Eth) != 1 || rep.Eth[0].Interface != "eth0" {
+		t.Errorf("Zero 2W OTG path: %+v", rep)
+	}
+}
+
+func TestProbeAcceptsUSBIDOnly(t *testing.T) {
+	// Some kernels expose the uevent PRODUCT= line via the netdev's
+	// own "device" symlink target, but the symlink target may not
+	// contain a "usb" substring (e.g. it points straight at the
+	// usb_interface dir whose path doesn't include "usb"). Make sure
+	// we still classify those as USB based on the uevent alone.
+	sysClassNet := makeFakeSysfs(t, map[string]struct {
+		uevent, devPath string
+	}{
+		"eth0": {
+			uevent:  "DRIVER=r8152\nPRODUCT=bda/8152/2000\n",
+			devPath: "devices/foo/bar", // path without "usb" anywhere
+		},
+	})
+	rep, err := Probe{SysClassNet: sysClassNet, ModelFile: "/nonexistent"}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.RouterCapable {
+		t.Errorf("USB-ID-only path should still classify as USB: %+v", rep)
+	}
+}
+
 func TestProbeSkipsNonUSBNetdev(t *testing.T) {
 	sysClassNet := makeFakeSysfs(t, map[string]struct {
 		uevent, devPath string

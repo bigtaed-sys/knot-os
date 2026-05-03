@@ -172,6 +172,17 @@ func scanUSBEth(sysClassNet string) ([]EthAdapter, error) {
 // readAdapter inspects /sys/class/net/<ifname> and returns a populated
 // EthAdapter when it is a USB-attached Ethernet interface; returns
 // (_, false) for everything else (PCIe NICs, virtual interfaces).
+//
+// USB recognition uses two independent signals so a quirk in one
+// doesn't drop the adapter:
+//
+//   - The device symlink target contains "usb" anywhere in the path
+//     (covers both "/sys/devices/.../soc/3f980000.usb/usb1/..." on
+//     a Zero 2W and "/sys/devices/pci.../usb1/..." on a Pi 5).
+//   - The uevent file contains a PRODUCT= line, which is the
+//     canonical USB-device fingerprint (vendor/product/version).
+//
+// Either condition is enough; both are robust on Pi OS Lite.
 func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 	devLink := filepath.Join(sysClassNet, ifname, "device")
 	resolved, err := os.Readlink(devLink)
@@ -179,14 +190,15 @@ func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 		// No device symlink → virtual iface (bridge, tun, veth, …).
 		return EthAdapter{}, false
 	}
-	// USB devices live under /sys/devices/.../usb*; the resolved
-	// link contains "usb" as a path component.
-	if !strings.Contains(resolved, "/usb") {
-		return EthAdapter{}, false
-	}
 
 	uevent, _ := os.ReadFile(filepath.Join(devLink, "uevent"))
 	driver, vendor, product := parseUevent(string(uevent))
+
+	hasUSBPath := strings.Contains(resolved, "usb")
+	hasUSBID := vendor != "" && product != ""
+	if !hasUSBPath && !hasUSBID {
+		return EthAdapter{}, false
+	}
 
 	return EthAdapter{
 		Interface:  ifname,

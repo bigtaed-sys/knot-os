@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -28,11 +29,29 @@ func (s *Server) MountSetup(r chi.Router) {
 // The wizard uses the result to decide whether to show the
 // "extender vs full router" role picker (only when at least one
 // USB-Eth adapter is detected) and the guest-AP step (Pi 4/5).
-func (s *Server) handleSetupCapability(w http.ResponseWriter, _ *http.Request) {
+//
+// Each call runs the probe live — no caching, so a user who
+// plugs in the dongle mid-wizard can hit "rescan" and see it
+// without restarting knotd.
+func (s *Server) handleSetupCapability(w http.ResponseWriter, r *http.Request) {
 	rep, err := capability.Probe{}.Run()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "capability_failed", err.Error())
 		return
+	}
+	// Best-effort log so an operator with serial / journalctl access
+	// can see exactly what was detected, which is faster to debug
+	// than "the wizard didn't show the role step on my Pi".
+	if r != nil {
+		// Use the request context's logger if present in the future;
+		// for now, log via the standard logger which is wired to
+		// stderr in main.go.
+		log.Printf("setup/capability: pi=%q router_capable=%v eth=%d",
+			rep.Pi, rep.RouterCapable, len(rep.Eth))
+		for _, a := range rep.Eth {
+			log.Printf("setup/capability: eth %s driver=%s usb=%s:%s model=%q",
+				a.Interface, a.Driver, a.USBVendor, a.USBProduct, a.Model)
+		}
 	}
 	writeJSON(w, http.StatusOK, rep)
 }
