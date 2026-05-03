@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/knot-os/knot-os/core/internal/config"
 )
@@ -62,15 +61,36 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	b.removeAP(ctx)
 	b.addrFlush(ctx, IfaceWlan)
 
-	// 2. WAN: bring the link up, run dhclient -1 against it. 30s timeout
-	//    matches the extender's wlan0 dhclient.
+	// 2. WAN: bring the link up, kick dhclient in the background.
+	//
+	// We DON'T block on a successful lease here. Reason: a freshly
+	// configured Pi may have no Ethernet cable plugged in yet (user
+	// is still wiring things up at their desk), and dhclient -1
+	// with no carrier just sits for 30+ seconds before failing.
+	// Old behaviour: the whole apply aborted, hostapd never started,
+	// the LAN-side AP never came up, the user couldn't even reach
+	// the dashboard to see what was wrong.
+	//
+	// New behaviour: spawn dhclient as a long-lived self-daemonizing
+	// process. It keeps retrying internally; whenever the cable gets
+	// plugged in, a lease arrives within a few seconds and the
+	// dashboard's WAN tile flips from "down" to "up" with the IP.
+	// The AP, NAT, DNS, and admin UI come up immediately and stay
+	// reachable from the LAN regardless of the WAN's state.
 	if err := b.linkUp(ctx, wan); err != nil {
 		return fmt.Errorf("applyRouter: bring %s up: %w", wan, err)
 	}
-	dhcpCtx, dhcpCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer dhcpCancel()
-	if err := b.r.runOK(dhcpCtx, "dhclient", "-1", wan); err != nil {
-		return fmt.Errorf("applyRouter: dhclient on %s: %w", wan, err)
+	// Kill any leftover dhclient on this interface (from a previous
+	// apply or boot) before starting a fresh one. Best-effort.
+	b.r.runIgnoreError(ctx, "pkill", "-f", "dhclient.*"+wan)
+	// dhclient without `-1` daemonizes and keeps retrying internally.
+	// We don't supervise it through supervisedProc because it
+	// self-daemonizes; just fire and forget.
+	if err := b.r.runOK(ctx, "dhclient", wan); err != nil {
+		// Non-zero from dhclient occasionally happens when racing
+		// with a previous instance during a rapid re-apply. The AP
+		// path below is what users actually need to function.
+		b.logger.Printf("applyRouter: dhclient on %s returned %v (continuing)", wan, err)
 	}
 
 	// 3. wlan0 LAN side. Same gateway-on-the-LAN-CIDR pattern as
