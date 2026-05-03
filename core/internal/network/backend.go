@@ -67,6 +67,9 @@ type Status struct {
 	Uplink *UplinkStatus `json:"uplink,omitempty"`
 	// AP reports the broadcasted Wi-Fi state. Nil if no AP is configured.
 	AP *APStatus `json:"ap,omitempty"`
+	// WAN reports the wired upstream state in wifi-router mode. Nil for
+	// every other role.
+	WAN *WANStatus `json:"wan,omitempty"`
 }
 
 // UplinkStatus is the runtime state of the wlan0 STA connection.
@@ -83,4 +86,18 @@ type APStatus struct {
 	SSID    string `json:"ssid"`
 	Up      bool   `json:"up"`
 	Clients int    `json:"clients"`
+}
+
+// WANStatus is the runtime state of the Ethernet WAN interface in
+// wifi-router mode.
+type WANStatus struct {
+	// Interface is the kernel netdev name (e.g. "eth0").
+	Interface string `json:"interface"`
+	// Mode is the configured WAN mode ("dhcp" today; statics later).
+	Mode string `json:"mode,omitempty"`
+	// Up reports whether the link is carrier-up.
+	Up bool `json:"up"`
+	// IP is the address the DHCP client picked up. Empty when no
+	// lease is held.
+	IP string `json:"ip,omitempty"`
 }

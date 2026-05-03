@@ -1,7 +1,7 @@
 // API response types. Hand-written for now; in M4+ we generate these
 // from the Go contract.
 
-export type Role = 'setup' | 'wifi-extender';
+export type Role = 'setup' | 'wifi-extender' | 'wifi-router';
 
 export interface UplinkStatus {
 	ssid: string;
@@ -15,11 +15,19 @@ export interface APStatus {
 	clients: number;
 }
 
+export interface WANStatus {
+	interface: string;
+	mode?: string;
+	up: boolean;
+	ip?: string;
+}
+
 export interface NetworkStatus {
 	backend: string;
 	role: Role;
 	uplink?: UplinkStatus;
 	ap?: APStatus;
+	wan?: WANStatus;
 }
 
 export interface SystemStatus {

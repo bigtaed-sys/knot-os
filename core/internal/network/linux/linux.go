@@ -134,6 +134,26 @@ func (b *LinuxBackend) Status(_ context.Context) (network.Status, error) {
 			Up:   b.hostapd != nil && b.hostapd.Running(),
 		}
 	}
+	if b.current.Network.WAN != nil {
+		w := &network.WANStatus{
+			Interface: b.current.Network.WAN.Interface,
+			Mode:      b.current.Network.WAN.Mode,
+		}
+		// Carrier state from /sys/class/net/<iface>/operstate. "up" or
+		// "lower_up" mean the link is alive; everything else (down,
+		// dormant, notpresent) is treated as no carrier. We don't fail
+		// the whole Status call on read errors — the dashboard tile
+		// just shows a "down" state, same as if there were no carrier.
+		if state, err := readOperstate(b.current.Network.WAN.Interface); err == nil {
+			w.Up = state == "up"
+		}
+		// Address: first IPv4 address bound to the interface, if any.
+		// Best-effort, not fatal.
+		if ip, err := readPrimaryIPv4(b.current.Network.WAN.Interface); err == nil {
+			w.IP = ip
+		}
+		st.WAN = w
+	}
 	return st, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -130,6 +131,55 @@ func effectiveCountry(c string) string {
 func (b *LinuxBackend) unblockAndRegulate(ctx context.Context, country string) {
 	b.r.runIgnoreError(ctx, "rfkill", "unblock", "wifi")
 	b.r.runIgnoreError(ctx, "iw", "reg", "set", effectiveCountry(country))
+}
+
+// readOperstate returns the carrier state of an interface from
+// /sys/class/net/<iface>/operstate. Common values: "up", "down",
+// "dormant", "unknown", "notpresent".
+func readOperstate(iface string) (string, error) {
+	b, err := os.ReadFile(fmt.Sprintf("/sys/class/net/%s/operstate", iface))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// readPrimaryIPv4 returns the first IPv4 address bound to iface, or
+// an empty string if none. Uses `ip -4 addr show dev <iface>` and
+// scans for the first inet line; doing this without parsing JSON
+// keeps us out of any "ip" version differences.
+func readPrimaryIPv4(iface string) (string, error) {
+	// We deliberately spawn ip rather than poking netlink directly:
+	// keeps the dependency surface tiny and matches how the rest of
+	// the backend interacts with the network stack.
+	out, err := exec_run("ip", "-4", "-o", "addr", "show", "dev", iface)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		// Format: "<idx>: <iface> inet <addr>/<prefix> ..."
+		for i, f := range fields {
+			if f == "inet" && i+1 < len(fields) {
+				addr := fields[i+1]
+				if slash := strings.IndexByte(addr, '/'); slash > 0 {
+					addr = addr[:slash]
+				}
+				return addr, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// exec_run runs a short command and returns combined output. Kept
+// here as a small private helper so iface.go has no dependency on
+// the runner machinery in exec.go (which is geared toward long-
+// running supervised processes).
+func exec_run(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // flipLocalBit toggles the locally-administered bit (0x02) of the
