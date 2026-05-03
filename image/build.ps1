@@ -160,6 +160,40 @@ if ($missing) {
     if ($LASTEXITCODE -ne 0) { throw 'apt install failed' }
 }
 
+# Verify binfmt_misc is registered for arm64. Without this, every
+# command we try to run inside the qemu chroot fails with "Exec
+# format error" — the kernel sees the arm64 ELF magic but doesn't
+# know to route execs through /usr/bin/qemu-aarch64-static.
+# WSL2 loses these registrations on every `wsl --shutdown`, so even
+# a previously-working machine can hit this after a reboot.
+$binfmtCheck = & wsl.exe -d $Distro -e bash -lc 'test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && head -1 /proc/sys/fs/binfmt_misc/qemu-aarch64 | grep -q enabled && echo OK || echo MISSING'
+if (($binfmtCheck | Out-String).Trim() -ne 'OK') {
+    Write-Host ''
+    Write-Host 'binfmt_misc for qemu-aarch64 is not registered in WSL.' -ForegroundColor Yellow
+    Write-Host '  This usually means WSL was restarted since qemu-user-static was set up.'
+    Write-Host '  Re-registering now…'
+    # Try the systemd path first (Ubuntu 22.04+ with systemd-on-WSL),
+    # fall back to update-binfmts which works on every layout.
+    & wsl.exe -d $Distro -e bash -lc 'sudo systemctl restart systemd-binfmt 2>/dev/null || sudo update-binfmts --enable qemu-aarch64'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host 'Could not register binfmt automatically. Run this in WSL and try again:' -ForegroundColor Red
+        Write-Host '    sudo apt-get install --reinstall qemu-user-static binfmt-support' -ForegroundColor Yellow
+        exit 1
+    }
+    # Recheck.
+    $binfmtCheck = & wsl.exe -d $Distro -e bash -lc 'test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 && head -1 /proc/sys/fs/binfmt_misc/qemu-aarch64 | grep -q enabled && echo OK || echo MISSING'
+    if (($binfmtCheck | Out-String).Trim() -ne 'OK') {
+        Write-Host ''
+        Write-Host 'Still no binfmt for qemu-aarch64 after retrying.' -ForegroundColor Red
+        Write-Host 'Run inside WSL:' -ForegroundColor Yellow
+        Write-Host '    sudo apt-get install --reinstall qemu-user-static binfmt-support'
+        Write-Host '    sudo systemctl restart systemd-binfmt'
+        exit 1
+    }
+    Write-Host '  binfmt registered.' -ForegroundColor Green
+}
+
 # ---- 4. Sync source into WSL native fs ------------------------------------
 
 # Convert E:\routerOS to /mnt/e/routerOS for rsync source.
