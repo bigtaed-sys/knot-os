@@ -8,6 +8,7 @@ import (
 
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/network/capability"
 )
 
 // MountSetup registers the /setup/* endpoints used by the first-run
@@ -18,8 +19,22 @@ func (s *Server) MountSetup(r chi.Router) {
 	r.Route("/setup", func(r chi.Router) {
 		r.Use(s.requireSetupRole)
 		r.Get("/scan", s.handleSetupScan)
+		r.Get("/capability", s.handleSetupCapability)
 		r.Post("/complete", s.handleSetupComplete)
 	})
+}
+
+// handleSetupCapability runs the hardware probe and returns it.
+// The wizard uses the result to decide whether to show the
+// "extender vs full router" role picker (only when at least one
+// USB-Eth adapter is detected) and the guest-AP step (Pi 4/5).
+func (s *Server) handleSetupCapability(w http.ResponseWriter, _ *http.Request) {
+	rep, err := capability.Probe{}.Run()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "capability_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 // requireSetupRole gates setup-only endpoints. Returns 410 Gone when
@@ -52,6 +67,10 @@ func (s *Server) handleSetupScan(w http.ResponseWriter, r *http.Request) {
 
 // completeRequest is the body of POST /api/setup/complete. It carries
 // every value the wizard collects, plus a confirmed admin password.
+//
+// Role drives which sub-blocks are required:
+//   - "wifi-extender" (default): Uplink is required, WAN is ignored.
+//   - "wifi-router":              WAN is required, Uplink is ignored.
 type completeRequest struct {
 	Device struct {
 		Name    string `json:"name"`
@@ -60,16 +79,25 @@ type completeRequest struct {
 
 	Password string `json:"password"`
 
+	// Role: "wifi-extender" (default if empty) or "wifi-router".
+	Role string `json:"role,omitempty"`
+
 	Uplink struct {
 		SSID string `json:"ssid"`
 		PSK  string `json:"psk"`
 	} `json:"uplink"`
 
 	AP struct {
-		SSID string `json:"ssid"`
-		PSK  string `json:"psk"`
-		Band string `json:"band"`
+		SSID    string `json:"ssid"`
+		PSK     string `json:"psk"`
+		Band    string `json:"band"`
+		Channel int    `json:"channel,omitempty"`
 	} `json:"ap"`
+
+	WAN struct {
+		Interface string `json:"interface"`
+		Mode      string `json:"mode,omitempty"`
+	} `json:"wan"`
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
@@ -92,18 +120,47 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	lan := s.cfg.Network.LAN
 	s.mu.RUnlock()
 
+	role := config.Role(req.Role)
+	if role == "" {
+		role = config.RoleWiFiExtender
+	}
+
 	finished := config.Config{
 		Device: config.Device{
 			Name:    req.Device.Name,
 			Country: req.Device.Country,
 		},
-		Role: config.RoleWiFiExtender,
+		Role: role,
 		Auth: config.Auth{PasswordHash: hash},
 		Network: config.Network{
-			Uplink: &config.WiFiUplink{SSID: req.Uplink.SSID, PSK: req.Uplink.PSK},
-			AP:     &config.WiFiAP{SSID: req.AP.SSID, PSK: req.AP.PSK, Band: req.AP.Band},
-			LAN:    lan,
+			AP: &config.WiFiAP{
+				SSID:    req.AP.SSID,
+				PSK:     req.AP.PSK,
+				Band:    req.AP.Band,
+				Channel: req.AP.Channel,
+			},
+			LAN: lan,
 		},
+	}
+	switch role {
+	case config.RoleWiFiExtender:
+		finished.Network.Uplink = &config.WiFiUplink{
+			SSID: req.Uplink.SSID,
+			PSK:  req.Uplink.PSK,
+		}
+	case config.RoleWiFiRouter:
+		mode := req.WAN.Mode
+		if mode == "" {
+			mode = "dhcp"
+		}
+		finished.Network.WAN = &config.WAN{
+			Interface: req.WAN.Interface,
+			Mode:      mode,
+		}
+	default:
+		writeError(w, http.StatusUnprocessableEntity, "invalid_role",
+			"role must be \"wifi-extender\" or \"wifi-router\"")
+		return
 	}
 	if err := finished.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_config", err.Error())

@@ -98,14 +98,15 @@ func shouldRedirectHTTPS(cfg config.Config, devMode bool, tlsEnabled bool) bool 
 // bind to given the current config. Returns "" when no listener
 // should be active.
 //
-//	role=setup           → "" (dnsmasq holds 53 for the captive portal)
-//	role=wifi-extender   → "<gateway>:53"
-//	dev mode             → "" (no port 53 binding on a developer's box)
+//	role=setup            → "" (dnsmasq holds 53 for the captive portal)
+//	role=wifi-extender    → "<gateway>:53"
+//	role=wifi-router      → "<gateway>:53"
+//	dev mode              → "" (no port 53 binding on a developer's box)
 func dnsListenForRole(cfg config.Config, devMode bool) string {
 	if devMode {
 		return ""
 	}
-	if cfg.Role != config.RoleWiFiExtender {
+	if cfg.Role != config.RoleWiFiExtender && cfg.Role != config.RoleWiFiRouter {
 		return ""
 	}
 	lan := cfg.Network.LAN
@@ -455,7 +456,7 @@ func main() {
 	//   - HTTPS redirect on/off (setup → wifi-* flips it on)
 	apiSrv.SetOnConfigApplied(func(applied config.Config) {
 		dnsServer.SetListen(dnsListenForRole(applied, *dev))
-		if applied.Role == config.RoleWiFiExtender {
+		if applied.Role == config.RoleWiFiExtender || applied.Role == config.RoleWiFiRouter {
 			dnsDownloader.RefreshNow()
 		}
 		if tlsMaterials != nil {

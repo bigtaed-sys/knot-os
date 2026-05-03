@@ -97,6 +97,10 @@ func (b *LinuxBackend) Apply(ctx context.Context, cfg config.Config) error {
 		if err := b.applyExtender(ctx, cfg); err != nil {
 			return err
 		}
+	case config.RoleWiFiRouter:
+		if err := b.applyRouter(ctx, cfg); err != nil {
+			return err
+		}
 	default:
 		return errors.New("LinuxBackend.Apply: unsupported role " + string(cfg.Role))
 	}

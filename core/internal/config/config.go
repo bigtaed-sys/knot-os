@@ -16,6 +16,12 @@ const (
 	// re-broadcasts a separate SSID via ap0, NATting between them. This is
 	// the primary v0.1 role on a Pi Zero 2W with no Ethernet dongle.
 	RoleWiFiExtender Role = "wifi-extender"
+
+	// RoleWiFiRouter is full-router mode added in v0.3: a USB-Ethernet
+	// adapter is the WAN, wlan0 is a dedicated AP (no STA), the user
+	// picks the AP channel directly. Available wherever the capability
+	// probe finds a USB-Eth netdev — Zero 2W and Pi 4/5 alike.
+	RoleWiFiRouter Role = "wifi-router"
 )
 
 // Config is the root configuration document, persisted as YAML at
@@ -49,13 +55,16 @@ type Device struct {
 // Network groups all networking-related settings.
 type Network struct {
 	// Uplink describes the Wi-Fi STA connection (wlan0). Empty when the
-	// role is "setup".
+	// role is "setup" or "wifi-router".
 	Uplink *WiFiUplink `yaml:"uplink,omitempty" json:"uplink,omitempty"`
-	// AP describes the broadcasted Wi-Fi network (ap0). Empty when the
-	// role does not broadcast a network.
+	// AP describes the broadcasted Wi-Fi network (ap0 in extender,
+	// wlan0 in router). Empty when the role does not broadcast.
 	AP *WiFiAP `yaml:"ap,omitempty" json:"ap,omitempty"`
 	// LAN describes the IPv4 subnet served to AP clients.
 	LAN *LAN `yaml:"lan,omitempty" json:"lan,omitempty"`
+	// WAN is the upstream interface for the wifi-router role.
+	// Empty in setup and extender roles.
+	WAN *WAN `yaml:"wan,omitempty" json:"wan,omitempty"`
 }
 
 // WiFiUplink is the configuration of the upstream Wi-Fi connection.
@@ -77,10 +86,30 @@ type WiFiUplink struct {
 // share a single radio (BCM43436), the kernel forces them onto the same
 // channel as the uplink. The UI surfaces this constraint to the user.
 type WiFiAP struct {
-	SSID         string `yaml:"ssid"                    json:"ssid"`
-	PSK string `yaml:"psk,omitempty" json:"psk,omitempty"`
+	SSID string `yaml:"ssid"                    json:"ssid"`
+	PSK  string `yaml:"psk,omitempty" json:"psk,omitempty"`
 	// Band is "2.4" or "5". On Zero 2W only 2.4 is supported reliably for ap0.
 	Band string `yaml:"band" json:"band"`
+	// Channel is the explicit AP channel. Honoured in wifi-router
+	// mode (AP runs alone on the radio so the user picks freely);
+	// ignored in wifi-extender (kernel forces same-channel as STA).
+	// 0 means "let hostapd / driver choose".
+	Channel int `yaml:"channel,omitempty" json:"channel,omitempty"`
+}
+
+// WAN describes the upstream Ethernet for the wifi-router role.
+//
+// v0.3 only supports the default "dhcp" mode — knotd runs a DHCP
+// client (dhclient) on Interface and uses whatever the upstream
+// router hands out. Static-IP and PPPoE are scoped for v0.4.
+type WAN struct {
+	// Interface is the kernel netdev name (e.g. "eth0"). Resolved
+	// at apply-time from the capability probe; the wizard surfaces
+	// the friendly model name but stores the kernel name here so
+	// future udev re-naming doesn't silently break the role.
+	Interface string `yaml:"interface" json:"interface"`
+	// Mode is one of: "dhcp" (default).
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // LAN is the IPv4 subnet config for the AP side.

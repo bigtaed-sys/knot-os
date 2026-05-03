@@ -39,8 +39,51 @@ func (c Config) Validate() error {
 		if err := c.Network.validateExtender(); err != nil {
 			return fmt.Errorf("network: %w", err)
 		}
+	case RoleWiFiRouter:
+		if c.Auth.PasswordHash == "" {
+			return fmt.Errorf("auth.password_hash: must be set outside of setup mode")
+		}
+		if err := c.Network.validateRouter(); err != nil {
+			return fmt.Errorf("network: %w", err)
+		}
 	default:
 		return fmt.Errorf("role: %q is not a known role", c.Role)
+	}
+	return nil
+}
+
+// validateRouter shares the AP/LAN constraints with the extender
+// path but additionally requires WAN and the AP.Channel that the
+// user picked (since router AP runs alone on the radio with no
+// upstream STA to align with). Channel 0 ("auto") is allowed and
+// hostapd will pick.
+func (n Network) validateRouter() error {
+	if n.WAN == nil || n.WAN.Interface == "" {
+		return fmt.Errorf("wan.interface is required for wifi-router role")
+	}
+	if n.WAN.Mode != "" && n.WAN.Mode != "dhcp" {
+		return fmt.Errorf("wan.mode: only \"dhcp\" is supported in v0.3 (got %q)", n.WAN.Mode)
+	}
+	if n.AP == nil || n.AP.SSID == "" {
+		return fmt.Errorf("ap.ssid is required for wifi-router role")
+	}
+	if n.AP.Band != "2.4" && n.AP.Band != "5" {
+		return fmt.Errorf("ap.band must be \"2.4\" or \"5\" (got %q)", n.AP.Band)
+	}
+	if n.AP.Channel < 0 || n.AP.Channel > 165 {
+		return fmt.Errorf("ap.channel: %d outside 0..165", n.AP.Channel)
+	}
+	if n.LAN == nil {
+		return fmt.Errorf("lan is required for wifi-router role")
+	}
+	if _, _, err := net.ParseCIDR(n.LAN.CIDR); err != nil {
+		return fmt.Errorf("lan.cidr: %w", err)
+	}
+	if ip := net.ParseIP(n.LAN.DHCP.PoolStart); ip == nil {
+		return fmt.Errorf("lan.dhcp.pool_start: invalid IP %q", n.LAN.DHCP.PoolStart)
+	}
+	if ip := net.ParseIP(n.LAN.DHCP.PoolEnd); ip == nil {
+		return fmt.Errorf("lan.dhcp.pool_end: invalid IP %q", n.LAN.DHCP.PoolEnd)
 	}
 	return nil
 }

@@ -1,13 +1,34 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { _ } from 'svelte-i18n';
 	import { goto } from '$app/navigation';
 	import { apiGet, apiPost, ApiError } from '$lib/api';
 	import type { ScanResponse, ScannedNetwork } from '$lib/types';
 
-	type Step = 1 | 2 | 3 | 4;
+	type Role = 'wifi-extender' | 'wifi-router';
+	type Step = 1 | 2 | 3 | 4 | 5;
 	let step = $state<Step>(1);
 
-	// Step 1
+	// Capability probe — loaded on mount. Drives whether the role
+	// step (step 2) is shown and what the connection step (step 3)
+	// looks like.
+	type EthAdapter = {
+		interface: string;
+		driver?: string;
+		usb_vendor?: string;
+		usb_product?: string;
+		model: string;
+	};
+	type CapabilityReport = {
+		pi: string;
+		pi_model_string?: string;
+		eth: EthAdapter[];
+		guest_ap_capable: boolean;
+		router_capable: boolean;
+	};
+	let cap = $state<CapabilityReport | null>(null);
+
+	// Step 1 — device + admin
 	let deviceName = $state('knot');
 	let country = $state('RU');
 	let password = $state('');
@@ -21,13 +42,18 @@
 		return null;
 	});
 
-	// Step 2
+	// Step 2 — role choice. Only shown when capability says router is
+	// feasible; otherwise role is forced to "wifi-extender".
+	let role = $state<Role>('wifi-extender');
+	const showRoleStep = $derived(cap?.router_capable === true);
+
+	// Step 3a — extender uplink
 	let networks = $state<ScannedNetwork[]>([]);
 	let scanning = $state(false);
 	let uplinkSSID = $state('');
 	let uplinkPSK = $state('');
 	const uplinkSecured = $derived(networks.find((n) => n.ssid === uplinkSSID)?.secured ?? true);
-	const step2Error = $derived.by(() => {
+	const step3ExtenderError = $derived.by(() => {
 		if (!uplinkSSID) return $_('setup.err_uplink');
 		if (uplinkSecured && !uplinkPSK) return $_('setup.err_uplink_psk');
 		return null;
@@ -45,13 +71,28 @@
 		}
 	}
 
-	// Step 3
+	// Step 3b — router WAN
+	let wanInterface = $state('');
+	const step3RouterError = $derived.by(() => {
+		if (!wanInterface) return $_('setup.err_wan');
+		return null;
+	});
+
+	const step3Error = $derived(role === 'wifi-router' ? step3RouterError : step3ExtenderError);
+
+	// Step 4 — AP. Channel matters only for router (extender pins to
+	// upstream). For 2.4 GHz the useful set is 1..13 (regional caps
+	// vary; the validator on the server bounds 0..165).
 	let apSSID = $state('KnotNet');
 	let apPSK = $state('');
 	let apBand = $state<'2.4'>('2.4');
-	const step3Error = $derived.by(() => {
+	let apChannel = $state(6);
+	const step4Error = $derived.by(() => {
 		if (!apSSID) return $_('setup.err_ap_ssid');
 		if (apPSK.length > 0 && apPSK.length < 8) return $_('setup.err_ap_psk');
+		if (role === 'wifi-router' && (apChannel < 1 || apChannel > 13)) {
+			return $_('setup.err_ap_channel');
+		}
 		return null;
 	});
 
@@ -63,17 +104,28 @@
 		submitting = true;
 		submitError = null;
 		try {
-			await apiPost('/setup/complete', {
+			const body: Record<string, unknown> = {
 				device: { name: deviceName, country },
 				password,
-				uplink: { ssid: uplinkSSID, psk: uplinkSecured ? uplinkPSK : '' },
-				ap: { ssid: apSSID, psk: apPSK, band: apBand }
-			});
+				role,
+				ap: {
+					ssid: apSSID,
+					psk: apPSK,
+					band: apBand,
+					channel: role === 'wifi-router' ? apChannel : 0
+				}
+			};
+			if (role === 'wifi-extender') {
+				body.uplink = { ssid: uplinkSSID, psk: uplinkSecured ? uplinkPSK : '' };
+			} else {
+				body.wan = { interface: wanInterface, mode: 'dhcp' };
+			}
+			await apiPost('/setup/complete', body);
 			goto('/', { replaceState: true });
 		} catch (e) {
 			if (e instanceof ApiError) {
-				const body = e.body as { error?: { message?: string } } | undefined;
-				submitError = body?.error?.message ?? e.message;
+				const ebody = e.body as { error?: { message?: string } } | undefined;
+				submitError = ebody?.error?.message ?? e.message;
 			} else {
 				submitError = e instanceof Error ? e.message : String(e);
 			}
@@ -83,16 +135,35 @@
 	}
 
 	function next() {
-		if (step === 1 && !step1Error) step = 2;
-		else if (step === 2 && !step2Error) step = 3;
-		else if (step === 3 && !step3Error) step = 4;
+		if (step === 1 && !step1Error) {
+			// Skip the role step when only extender is feasible.
+			step = (showRoleStep ? 2 : 3) as Step;
+		} else if (step === 2) {
+			step = 3;
+		} else if (step === 3 && !step3Error) {
+			step = 4;
+		} else if (step === 4 && !step4Error) {
+			step = 5;
+		}
 	}
 	function back() {
-		if (step > 1) step = (step - 1) as Step;
+		if (step === 5) step = 4;
+		else if (step === 4) step = 3;
+		else if (step === 3) step = (showRoleStep ? 2 : 1) as Step;
+		else if (step === 2) step = 1;
 	}
 
+	// On entering step 3 in extender mode, kick off a scan.
 	$effect(() => {
-		if (step === 2 && networks.length === 0 && !scanning) scan();
+		if (step === 3 && role === 'wifi-extender' && networks.length === 0 && !scanning) scan();
+	});
+
+	// On entering step 3 in router mode, default the interface to
+	// the first detected adapter so the user can just hit "next".
+	$effect(() => {
+		if (step === 3 && role === 'wifi-router' && !wanInterface && cap?.eth.length) {
+			wanInterface = cap.eth[0].interface;
+		}
 	});
 
 	function rssiBars(dbm: number): number {
@@ -103,12 +174,27 @@
 		return 0;
 	}
 
-	const steps = [
+	const steps = $derived([
 		{ n: 1, key: 'setup.step_device', icon: 'bi-router' },
-		{ n: 2, key: 'setup.step_uplink', icon: 'bi-cloud-arrow-up' },
-		{ n: 3, key: 'setup.step_ap', icon: 'bi-broadcast' },
-		{ n: 4, key: 'setup.step_review', icon: 'bi-check2-circle' }
-	] as const;
+		...(showRoleStep ? [{ n: 2, key: 'setup.step_role', icon: 'bi-diagram-2' }] : []),
+		{
+			n: 3,
+			key: role === 'wifi-router' ? 'setup.step_wan' : 'setup.step_uplink',
+			icon: role === 'wifi-router' ? 'bi-ethernet' : 'bi-cloud-arrow-up'
+		},
+		{ n: 4, key: 'setup.step_ap', icon: 'bi-broadcast' },
+		{ n: 5, key: 'setup.step_review', icon: 'bi-check2-circle' }
+	]);
+
+	onMount(async () => {
+		try {
+			cap = await apiGet<CapabilityReport>('/setup/capability');
+		} catch {
+			cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
+		}
+	});
+
+	const channelOptions = [1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13];
 </script>
 
 <div class="min-h-screen bg-gradient-to-br from-zinc-50 via-zinc-50 to-brand-50/30 dark:from-zinc-950 dark:via-zinc-900 dark:to-brand-950/40">
@@ -206,6 +292,51 @@
 					{/if}
 				</div>
 			{:else if step === 2}
+				<h2 class="text-lg font-semibold mb-1">{$_('setup.role_section_title')}</h2>
+				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+					{$_('setup.role_section_subtitle')}
+				</p>
+				{#if cap}
+					{#if cap.eth.length > 0}
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+							<i class="bi bi-ethernet mr-1"></i>
+							{$_('setup.role_detected', {
+								values: { adapter: cap.eth[0].model, iface: cap.eth[0].interface }
+							})}
+						</p>
+					{/if}
+				{/if}
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+					<button
+						type="button"
+						class="text-left p-4 rounded-xl border-2 transition-colors
+							{role === 'wifi-extender'
+								? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+								: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}"
+						onclick={() => (role = 'wifi-extender')}
+					>
+						<i class="bi bi-cloud-arrow-up text-2xl text-brand-500"></i>
+						<div class="font-semibold mt-2">{$_('setup.role_extender_title')}</div>
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+							{$_('setup.role_extender_help')}
+						</p>
+					</button>
+					<button
+						type="button"
+						class="text-left p-4 rounded-xl border-2 transition-colors
+							{role === 'wifi-router'
+								? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+								: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}"
+						onclick={() => (role = 'wifi-router')}
+					>
+						<i class="bi bi-router text-2xl text-brand-500"></i>
+						<div class="font-semibold mt-2">{$_('setup.role_router_title')}</div>
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+							{$_('setup.role_router_help')}
+						</p>
+					</button>
+				</div>
+			{:else if step === 3 && role === 'wifi-extender'}
 				<div class="flex items-start justify-between gap-4 mb-4">
 					<div>
 						<h2 class="text-lg font-semibold">{$_('setup.uplink_section_title')}</h2>
@@ -274,7 +405,40 @@
 						<input id="upsk" type="password" class="input" bind:value={uplinkPSK} autocomplete="off" />
 					</div>
 				{/if}
-			{:else if step === 3}
+			{:else if step === 3 && role === 'wifi-router'}
+				<h2 class="text-lg font-semibold mb-1">{$_('setup.wan_section_title')}</h2>
+				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+					{$_('setup.wan_section_subtitle')}
+				</p>
+				{#if cap?.eth && cap.eth.length > 0}
+					<ul class="surface-muted divide-y divide-zinc-200 dark:divide-zinc-700/50">
+						{#each cap.eth as a}
+							<li>
+								<label class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
+									<input
+										type="radio"
+										bind:group={wanInterface}
+										value={a.interface}
+										class="text-brand-600 focus:ring-brand-500"
+									/>
+									<div class="flex-1 min-w-0">
+										<div class="font-medium truncate">{a.model}</div>
+										<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+											{a.interface}
+											{#if a.usb_vendor && a.usb_product}
+												· {a.usb_vendor}:{a.usb_product}
+											{/if}
+											{#if a.driver}· {a.driver}{/if}
+										</div>
+									</div>
+								</label>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">{$_('setup.wan_none_detected')}</p>
+				{/if}
+			{:else if step === 4}
 				<h2 class="text-lg font-semibold mb-1">{$_('setup.ap_section_title')}</h2>
 				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
 					{$_('setup.ap_section_subtitle')}
@@ -296,30 +460,61 @@
 						</select>
 						<p class="help">{$_('setup.band_help')}</p>
 					</div>
-					{#if step3Error}
+					{#if role === 'wifi-router'}
+						<div>
+							<label class="label" for="apch">{$_('setup.channel_label')}</label>
+							<select id="apch" class="input" bind:value={apChannel}>
+								{#each channelOptions as c}
+									<option value={c}>{c}</option>
+								{/each}
+							</select>
+							<p class="help">{$_('setup.channel_help')}</p>
+						</div>
+					{/if}
+					{#if step4Error}
 						<p class="flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
 							<i class="bi bi-exclamation-circle"></i>
-							{step3Error}
+							{step4Error}
 						</p>
 					{/if}
 				</div>
-			{:else if step === 4}
+			{:else if step === 5}
 				<h2 class="text-lg font-semibold mb-4">{$_('setup.review_section_title')}</h2>
 				<dl class="surface-muted p-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
 					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_device')}</dt>
 					<dd class="font-medium">{deviceName} <span class="text-zinc-400">({country})</span></dd>
-					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_uplink')}</dt>
-					<dd class="font-medium truncate">{uplinkSSID}</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_role')}</dt>
+					<dd class="font-medium">
+						{role === 'wifi-router' ? $_('setup.role_router_title') : $_('setup.role_extender_title')}
+					</dd>
+					{#if role === 'wifi-extender'}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_uplink')}</dt>
+						<dd class="font-medium truncate">{uplinkSSID}</dd>
+					{:else}
+						<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_wan')}</dt>
+						<dd class="font-medium truncate">{wanInterface}</dd>
+					{/if}
 					<dt class="text-zinc-500 dark:text-zinc-400">{$_('setup.review_ap')}</dt>
-					<dd class="font-medium truncate">{apSSID} <span class="text-zinc-400">({apBand} GHz)</span></dd>
+					<dd class="font-medium truncate">
+						{apSSID}
+						<span class="text-zinc-400">
+							({apBand} GHz{#if role === 'wifi-router'}, ch {apChannel}{/if})
+						</span>
+					</dd>
 				</dl>
 
 				<div class="mt-4 flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-300">
 					<i class="bi bi-info-circle text-base mt-0.5 shrink-0"></i>
 					<p class="text-sm">
-						{$_('setup.review_warn', {
-							values: { setup: 'KnotOS-setup-XXXX', ap: apSSID, uplink: uplinkSSID }
-						})}
+						{#if role === 'wifi-extender'}
+							{$_('setup.review_warn', {
+								values: { setup: 'KnotOS-setup-XXXX', ap: apSSID, uplink: uplinkSSID }
+							})}
+						{:else}
+							{$_('setup.review_warn_router', {
+								values: { setup: 'KnotOS-setup-XXXX', ap: apSSID, wan: wanInterface }
+							})}
+						{/if}
 					</p>
 				</div>
 
@@ -343,11 +538,13 @@
 				<span></span>
 			{/if}
 
-			{#if step < 4}
+			{#if step < 5}
 				<button
 					class="btn-primary"
 					onclick={next}
-					disabled={(step === 1 && !!step1Error) || (step === 2 && !!step2Error) || (step === 3 && !!step3Error)}
+					disabled={(step === 1 && !!step1Error) ||
+						(step === 3 && !!step3Error) ||
+						(step === 4 && !!step4Error)}
 				>
 					{$_('setup.next')}
 					<i class="bi bi-arrow-right"></i>

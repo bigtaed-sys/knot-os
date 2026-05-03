@@ -43,6 +43,18 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	}
 }
 
+func TestValidateRouterAccepts(t *testing.T) {
+	c := Default()
+	c.Role = RoleWiFiRouter
+	c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+	c.Network.WAN = &WAN{Interface: "eth0", Mode: "dhcp"}
+	c.Network.AP = &WiFiAP{SSID: "knot-ap", Band: "2.4", Channel: 11}
+	c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("router with all required fields should validate: %v", err)
+	}
+}
+
 func TestValidateRejectsBadConfigs(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -92,6 +104,38 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 				c.Network.LAN = &LAN{CIDR: "not-a-cidr", DHCP: DHCP{PoolStart: "1.1.1.1", PoolEnd: "1.1.1.2"}}
 			},
 			wantSub: "lan.cidr",
+		},
+		{
+			name: "router without WAN",
+			mutate: func(c *Config) {
+				c.Role = RoleWiFiRouter
+				c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4"}
+				c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+			},
+			wantSub: "wan.interface",
+		},
+		{
+			name: "router unsupported WAN mode",
+			mutate: func(c *Config) {
+				c.Role = RoleWiFiRouter
+				c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+				c.Network.WAN = &WAN{Interface: "eth0", Mode: "pppoe"}
+				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4"}
+				c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+			},
+			wantSub: "wan.mode",
+		},
+		{
+			name: "router channel out of range",
+			mutate: func(c *Config) {
+				c.Role = RoleWiFiRouter
+				c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+				c.Network.WAN = &WAN{Interface: "eth0"}
+				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4", Channel: 200}
+				c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+			},
+			wantSub: "ap.channel",
 		},
 	}
 	for _, tc := range cases {

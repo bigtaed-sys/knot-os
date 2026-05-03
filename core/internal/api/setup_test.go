@@ -107,6 +107,68 @@ func TestSetupCompleteHappyPath(t *testing.T) {
 	}
 }
 
+func TestSetupCompleteRouterRole(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	body := completeRequest{}
+	body.Device.Name = "knot-test"
+	body.Device.Country = "RU"
+	body.Password = "good-password-9"
+	body.Role = string(config.RoleWiFiRouter)
+	body.WAN.Interface = "eth0"
+	body.AP.SSID = "KnotNet"
+	body.AP.PSK = "ap-secret"
+	body.AP.Band = "2.4"
+	body.AP.Channel = 11
+
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/setup/complete", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d (body=%s)", rec.Code, rec.Body)
+	}
+	snap := srv.Snapshot()
+	if snap.Role != config.RoleWiFiRouter {
+		t.Errorf("role: want %q, got %q", config.RoleWiFiRouter, snap.Role)
+	}
+	if snap.Network.WAN == nil || snap.Network.WAN.Interface != "eth0" {
+		t.Errorf("WAN: %+v", snap.Network.WAN)
+	}
+	if snap.Network.WAN.Mode != "dhcp" {
+		t.Errorf("WAN.Mode default should be \"dhcp\", got %q", snap.Network.WAN.Mode)
+	}
+	if snap.Network.AP.Channel != 11 {
+		t.Errorf("AP.Channel: want 11, got %d", snap.Network.AP.Channel)
+	}
+	if snap.Network.Uplink != nil {
+		t.Errorf("Uplink should be nil in router role, got %+v", snap.Network.Uplink)
+	}
+}
+
+func TestSetupCapabilityEndpointAvailable(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/setup/capability", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	// Probe runs against the host's real /sys when dev tests run.
+	// Code path is exercised; the result depends on the runner so we
+	// just verify the endpoint is reachable and parses as JSON.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d (body=%s)", rec.Code, rec.Body)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := got["router_capable"]; !ok {
+		t.Errorf("missing router_capable in response: %v", got)
+	}
+}
+
 func TestSetupCompleteRejectsWeakPassword(t *testing.T) {
 	srv := newTestServer(t, false)
 

@@ -130,6 +130,23 @@ func TestNftablesExtenderHasNatAndForward(t *testing.T) {
 	)
 }
 
+func TestNftablesRouterUsesEthWAN(t *testing.T) {
+	out := BuildNftablesRouter(RouterNftablesParams{
+		WANInterface: "eth0",
+		LANInterface: "wlan0",
+		LANCIDR:      "192.168.42.0/24",
+	})
+	mustContain(t, out,
+		`iifname "wlan0"`,
+		`oifname "eth0"`,
+		"masquerade",
+		"192.168.42.0/24",
+		"established,related",
+		"set blocked_macs",
+		"ether saddr @blocked_macs drop",
+	)
+}
+
 func TestNftablesCaptiveRedirects(t *testing.T) {
 	out := BuildNftablesCaptive(CaptivePortalParams{
 		LANInterface: "ap0",
