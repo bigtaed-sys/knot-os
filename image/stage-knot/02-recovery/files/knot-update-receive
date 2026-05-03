@@ -1,24 +1,43 @@
 #!/bin/bash
-# Receive a new knotd binary over the current terminal (serial console)
-# and install it. Counterpart to scripts/update-knot.ps1's -Serial mode.
+# Receive a new knotd binary over the current serial console and
+# install it. Counterpart to scripts/update-knot.ps1's -Serial mode.
 #
-# Run as root:
+# Run as root from a serial login (UART pins or USB-OTG gadget):
+#
 #   sudo knot-update-receive
 #
-# Wire protocol on stdin (line-oriented):
-#   KNOTUPDATE-BEGIN          - sender announces start
-#   <base64 line>             - one chunk per line (3 KB raw -> 4 KB b64)
+# The script forks a detached worker that:
+#   1. Stops the serial-getty for this tty so it doesn't compete
+#      for input.
+#   2. Opens /dev/<tty> as the worker's own stdin / stdout — that
+#      decouples it from the user's shell, so closing the terminal
+#      on the host side no longer sends SIGHUP to the receiver.
+#   3. Runs the upload protocol.
+#   4. Atomically replaces /usr/local/bin/knotd, restarts the
+#      service, and re-enables the getty so the user can log
+#      back in afterwards.
+#
+# Wire protocol on the serial line (line-oriented):
+#
+#   KNOTUPDATE-BEGIN          sender announces start
+#   <base64 line>             one chunk per line (3 KB raw -> 4 KB b64)
 #   <base64 line>
 #   ...
-#   KNOTUPDATE-END            - sender finished
+#   KNOTUPDATE-END            sender finished
 #
-# We respond with KNOTUPDATE-OK <bytes> on success, KNOTUPDATE-FAIL <msg>
-# on any error, then exit. The script then atomically replaces
-# /usr/local/bin/knotd and asks systemd to restart the service.
+#   KNOTUPDATE-OK  <bytes>    we wrote and verified the binary
+#   KNOTUPDATE-FAIL <message> something went wrong; binary kept old
+#
+# Failure or no-data timeout (15 minutes) re-enables the getty
+# without modifying knotd, so the user can log back in to debug.
 
 set -u
+
 TARGET=/usr/local/bin/knotd
 STAGING=/var/lib/knot/.knotd.update
+LOG=/var/log/knot-update.log
+TIMEOUT_SEC=900   # 15 minutes total
+
 mkdir -p /var/lib/knot
 
 if [[ "$EUID" -ne 0 ]]; then
@@ -26,59 +45,120 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-fail() {
-    echo "KNOTUPDATE-FAIL: $1"
-    rm -f "$STAGING"
+# --- internal mode: the actual protocol runs here -----------------------
+# Invoked by the wrapper after stdin/stdout have been redirected to the
+# serial device.
+
+if [[ "${1:-}" == "--inner" ]]; then
+    fail() {
+        echo "KNOTUPDATE-FAIL: $1"
+        rm -f "$STAGING"
+        exit 1
+    }
+
+    # Read with a per-line timeout so we don't hang forever if the
+    # sender disconnects mid-stream.
+    echo "knot-update-receive: waiting for KNOTUPDATE-BEGIN (15 min timeout)"
+    SECONDS=0
+    while IFS= read -r -t 60 line || true; do
+        if (( SECONDS > TIMEOUT_SEC )); then
+            fail "timeout waiting for BEGIN"
+        fi
+        if [[ "${line:-}" == "KNOTUPDATE-BEGIN" ]]; then
+            break
+        fi
+    done
+
+    : > "$STAGING"
+    chmod 0755 "$STAGING"
+
+    LINES=0
+    while IFS= read -r -t 60 line; do
+        if [[ "$line" == "KNOTUPDATE-END" ]]; then
+            break
+        fi
+        if [[ -z "$line" ]]; then
+            continue
+        fi
+        if ! printf '%s' "$line" | base64 -d >> "$STAGING" 2>/dev/null; then
+            fail "base64 decode error on line $LINES"
+        fi
+        LINES=$((LINES + 1))
+    done
+
+    if [[ ! -s "$STAGING" ]]; then
+        fail "received empty file"
+    fi
+
+    # ELF magic check (\x7fELF).
+    if [[ "$(head -c 4 "$STAGING" | od -An -c | tr -d ' \n')" != $'\\177ELF' ]]; then
+        fail "not an ELF binary"
+    fi
+
+    SIZE=$(stat -c '%s' "$STAGING")
+    if (( SIZE < 1048576 )); then
+        fail "file too small ($SIZE bytes)"
+    fi
+
+    mv "$STAGING" "$TARGET" || fail "rename failed"
+    chmod 0755 "$TARGET"
+
+    echo "KNOTUPDATE-OK $SIZE"
+
+    # Restart in the background so the response flushes first.
+    ( sleep 1 && systemctl restart knotd ) &
+    disown
+    exit 0
+fi
+
+# --- wrapper mode: detach into a private session, then exec --inner -----
+
+TTY="$(tty 2>/dev/null || true)"
+if [[ ! "${TTY:-}" =~ ^/dev/tty(AMA|GS|S) ]]; then
+    echo "knot-update-receive: must run from a serial console (current tty: ${TTY:-none})" >&2
+    echo "  Expected /dev/ttyAMA0, /dev/ttyGS0, or /dev/ttyS0." >&2
     exit 1
-}
-
-echo "knot-update-receive: waiting for KNOTUPDATE-BEGIN"
-while IFS= read -r line; do
-    if [[ "$line" == "KNOTUPDATE-BEGIN" ]]; then
-        break
-    fi
-done || fail "EOF before BEGIN"
-
-# Truncate staging file; we'll append decoded bytes per chunk.
-: > "$STAGING"
-chmod 0755 "$STAGING"
-
-LINES=0
-while IFS= read -r line; do
-    if [[ "$line" == "KNOTUPDATE-END" ]]; then
-        break
-    fi
-    if [[ -z "$line" ]]; then
-        continue
-    fi
-    if ! printf '%s' "$line" | base64 -d >> "$STAGING" 2>/dev/null; then
-        fail "base64 decode error on line $LINES"
-    fi
-    LINES=$((LINES + 1))
-done
-
-if [[ ! -s "$STAGING" ]]; then
-    fail "received empty file"
 fi
+TTYNAME="$(basename "$TTY")"
+GETTY_UNIT="serial-getty@${TTYNAME}.service"
 
-# ELF magic check.
-read -r -n 4 -d '' MAGIC < "$STAGING" || true
-if [[ "$(head -c 4 "$STAGING" | od -An -c | tr -d ' \n')" != $'\\177ELF' ]]; then
-    fail "not an ELF binary"
-fi
+cat <<EOF
+knot-update-receive: arming update mode on ${TTYNAME}.
 
-SIZE=$(stat -c '%s' "$STAGING")
-if [[ "$SIZE" -lt 1048576 ]]; then
-    fail "file too small ($SIZE bytes)"
-fi
+The receiver will now move into the background. Next steps on the host:
 
-# Atomic rename.
-mv "$STAGING" "$TARGET" || fail "rename failed"
-chmod 0755 "$TARGET"
+  1. Close your serial terminal (PuTTY / Termius / Arduino IDE / etc.)
+     so Windows releases the COM port.
+  2. Run: scripts/update-knot.ps1 -Serial COMx
+  3. After it finishes, reconnect — knotd will already have restarted
+     with the new binary. Boot log goes to ${LOG} during the transfer.
+EOF
 
-echo "KNOTUPDATE-OK $SIZE"
+# Hand off to a new session. The triple-quoted bash command runs
+# **after** the user's shell exits, so we cannot rely on that shell
+# at all from inside.
+SCRIPT="$0"
+nohup setsid bash -c "
+  set +e
+  systemctl stop '${GETTY_UNIT}' >/dev/null 2>&1
 
-# Restart knotd in the background so the response gets a chance to
-# flush before our PID dies along with the parent shell.
-( sleep 1 && systemctl restart knotd ) &
-disown
+  # Open the raw tty as our own stdin/stdout/stderr-to-log. This is
+  # what lets us survive the user closing the host-side terminal:
+  # we no longer share the file descriptors of the login shell.
+  exec </dev/${TTYNAME} >/dev/${TTYNAME} 2>>'${LOG}'
+
+  '${SCRIPT}' --inner
+  rc=\$?
+
+  # Always restore the getty so the user can log back in, regardless
+  # of whether the upload succeeded or timed out.
+  systemctl start '${GETTY_UNIT}' >/dev/null 2>&1
+  exit \$rc
+" </dev/null >/dev/null 2>&1 &
+WORKER=$!
+disown "$WORKER"
+
+echo ""
+echo "knot-update-receive: ready (pid ${WORKER}). You can disconnect now."
+echo "                     log file: ${LOG}"
+exit 0

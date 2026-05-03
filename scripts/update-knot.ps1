@@ -110,9 +110,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Http') {
 
 Write-Host "==> Sending knotd over serial ($Serial @ $BaudRate)"
 Write-Host '    This is slow (~10 KB/s) - expect ~12 minutes for a 7 MB binary.'
+Write-Host ''
 Write-Host '    On the device, log in via the same COM port and run:'
 Write-Host '        sudo knot-update-receive' -ForegroundColor Yellow
-Write-Host '    Then disconnect the terminal and re-run this script.'
+Write-Host '    The receiver detaches itself into a background session — the'
+Write-Host '    serial-getty is stopped, /dev/<tty> is reopened directly, so'
+Write-Host '    closing your terminal here will not kill it.'
+Write-Host ''
+Write-Host '    Then close your serial terminal so Windows releases the COM'
+Write-Host '    port, and re-run this script.'
 Write-Host ''
 
 $port = New-Object System.IO.Ports.SerialPort $Serial, $BaudRate, None, 8, One
