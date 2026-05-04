@@ -3,7 +3,13 @@
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, ApiError, ApiTimeoutError, API_BASE } from '$lib/api';
-	import type { SystemStatus, TLSInfo, UpdateCheckResult } from '$lib/types';
+	import type {
+		SystemStatus,
+		TLSInfo,
+		UpdateCheckResult,
+		RescueInfo,
+		RescueRevealed
+	} from '$lib/types';
 
 	let status = $state<SystemStatus | null>(null);
 	let tls = $state<TLSInfo | null>(null);
@@ -19,6 +25,13 @@
 	let updChecking = $state(false);
 	let updApplying = $state(false);
 	let updError = $state<string | null>(null);
+
+	// Rescue keypair state.
+	let rescue = $state<RescueInfo | null>(null);
+	let rescueAvailable = $state(true);
+	let revealing = $state(false);
+	let revealed = $state<RescueRevealed | null>(null);
+	let rescueError = $state<string | null>(null);
 
 	async function load() {
 		try {
@@ -40,6 +53,44 @@
 		// "Проверить" / "Check" explicitly. Endpoint-not-configured
 		// (503) gets surfaced from the click handler instead of
 		// pre-emptively here.
+
+		// Rescue info IS cheap — just a sysfs+memory read on the
+		// device — so we do load it on mount.
+		try {
+			rescue = await apiGet<RescueInfo>('/system/update/rescue', { timeoutMs: 3000 });
+			rescueAvailable = true;
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 503) rescueAvailable = false;
+		}
+	}
+
+	async function revealRescue() {
+		if (!rescue?.private_available) return;
+		if (!confirm($_('rescue.reveal_confirm'))) return;
+		revealing = true;
+		rescueError = null;
+		try {
+			revealed = await apiPost<RescueRevealed>('/system/update/rescue/reveal');
+			// Also reload the info so the "private_available" flag flips off.
+			rescue = await apiGet<RescueInfo>('/system/update/rescue');
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 410) {
+				rescueError = $_('rescue.error_already_revealed');
+			} else if (e instanceof Error) {
+				rescueError = e.message;
+			}
+		} finally {
+			revealing = false;
+		}
+	}
+
+	async function copyToClipboard(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			// Clipboard API can fail on insecure origins (HTTP); the
+			// user can still select+copy from the visible <code>.
+		}
 	}
 
 	async function checkUpdate() {
@@ -377,6 +428,86 @@
 			</div>
 		{/if}
 	</section>
+
+	<!-- Rescue keypair -->
+	{#if rescueAvailable}
+		<section class="surface p-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-key text-brand-500"></i>
+				{$_('rescue.section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-3">
+				{$_('rescue.subtitle')}
+			</p>
+
+			{#if rescue}
+				<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm mb-3">
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('rescue.public_key')}</dt>
+					<dd class="font-mono break-all text-xs">{rescue.public_key}</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('rescue.status')}</dt>
+					<dd>
+						{#if rescue.private_available}
+							<span class="badge badge-warn">
+								<i class="bi bi-eye"></i>
+								{$_('rescue.status_unrevealed')}
+							</span>
+						{:else}
+							<span class="badge badge-ok">
+								<i class="bi bi-shield-check"></i>
+								{$_('rescue.status_revealed')}
+							</span>
+						{/if}
+					</dd>
+				</dl>
+			{/if}
+
+			{#if rescue?.private_available}
+				<button class="btn-primary" disabled={revealing} onclick={revealRescue}>
+					{#if revealing}
+						<span class="spinner"></span>
+						{$_('rescue.revealing')}
+					{:else}
+						<i class="bi bi-eye"></i>
+						{$_('rescue.reveal')}
+					{/if}
+				</button>
+				<p class="text-xs text-amber-600 dark:text-amber-400 mt-2">
+					<i class="bi bi-exclamation-triangle"></i>
+					{$_('rescue.warning_one_shot')}
+				</p>
+			{:else if rescue}
+				<p class="text-xs text-zinc-500 dark:text-zinc-400">
+					<i class="bi bi-info-circle"></i>
+					{$_('rescue.already_revealed_help')}
+				</p>
+			{/if}
+
+			{#if revealed}
+				<div class="mt-4 p-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30">
+					<p class="text-sm text-amber-900 dark:text-amber-200 mb-2">
+						<i class="bi bi-exclamation-triangle-fill"></i>
+						{revealed.warning}
+					</p>
+					<div class="text-xs text-zinc-500 dark:text-zinc-400 mb-1">{$_('rescue.private_key_label')}</div>
+					<code class="block p-2 rounded bg-white dark:bg-zinc-900 font-mono text-xs break-all select-all">{revealed.private_key}</code>
+					<button
+						class="btn-ghost mt-2 text-xs"
+						onclick={() => copyToClipboard(revealed!.private_key)}
+					>
+						<i class="bi bi-clipboard"></i>
+						{$_('rescue.copy')}
+					</button>
+				</div>
+			{/if}
+
+			{#if rescueError}
+				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+					<span>{rescueError}</span>
+				</div>
+			{/if}
+		</section>
+	{/if}
 
 	<!-- Power -->
 	<section class="surface p-5">

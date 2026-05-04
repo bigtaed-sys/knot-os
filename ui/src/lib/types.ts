@@ -181,3 +181,14 @@ export interface UpdateCheckResult {
 	signing_enabled: boolean;
 	latest?: ReleaseInfo;
 }
+
+export interface RescueInfo {
+	public_key: string;
+	private_available: boolean;
+}
+
+export interface RescueRevealed {
+	private_key: string;
+	public_key: string;
+	warning: string;
+}

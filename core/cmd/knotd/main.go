@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"log"
@@ -402,12 +403,28 @@ func main() {
 	plugins.ApplyEnabledMap(enabled)
 	logger.Printf("plugins: %d discovered in %s", len(plugins.List()), *pluginsDir)
 
+	// Persisted sessions: in dev mode we keep them in memory (the dev
+	// run is short-lived, no persistence dir to mess with), in
+	// production we back them with /var/lib/knot/sessions.json so a
+	// reboot or auto-update doesn't kick the user out.
+	var sessions *auth.Sessions
+	if *dev {
+		sessions = auth.NewSessions()
+	} else {
+		s, err := auth.NewSessionsAt("/var/lib/knot/sessions.json")
+		if err != nil {
+			logger.Printf("sessions: load: %v (starting empty)", err)
+			s = auth.NewSessions()
+		}
+		sessions = s
+	}
+
 	apiSrv := api.New(api.Options{
 		ConfigPath: *configPath,
 		Initial:    cfg,
 		Version:    Version,
 		Backend:    backend,
-		Sessions:   auth.NewSessions(),
+		Sessions:   sessions,
 		Plugins:    plugins,
 	})
 	apiSrv.SetDeviceRegistry(devices)
@@ -425,6 +442,23 @@ func main() {
 	// /usr/local/bin/knotd, restart the service. Skipped in dev
 	// because the install path needs root + systemctl.
 	if !*dev {
+		// Per-device rescue keypair — generated on first boot,
+		// stored at /etc/knot/rescue.json with mode 0600. The
+		// public half authorises self-built binaries; the private
+		// half is delivered to the user once via the System UI
+		// then erased from disk. Loss of the rescue private key
+		// is a non-event for normal users (auto-update still works
+		// against the official release key); it matters only when
+		// the user wants to install their own builds OR the
+		// release key has been compromised.
+		var rescuePub ed25519.PublicKey
+		rescue, err := update.LoadOrCreateRescue(update.DefaultRescuePath)
+		if err != nil {
+			logger.Printf("update: rescue keypair: %v (continuing without rescue key)", err)
+		} else {
+			rescuePub = rescue.PublicKey()
+		}
+
 		updater, err := update.New(update.Options{
 			CurrentVersion: Version,
 			Logger:         logger,
@@ -432,7 +466,13 @@ func main() {
 		if err != nil {
 			logger.Printf("update: %v — auto-update endpoints disabled", err)
 		} else {
+			if rescuePub != nil {
+				updater.SetRescueKey(rescuePub)
+			}
 			apiSrv.SetUpdateManager(updater)
+			if rescue != nil {
+				apiSrv.SetRescue(rescue)
+			}
 		}
 	}
 	// SchedulerKick lets the API trigger an immediate scheduler tick

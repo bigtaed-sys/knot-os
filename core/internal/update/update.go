@@ -147,6 +147,14 @@ func New(opts Options) (*Manager, error) {
 	return m, nil
 }
 
+// SetRescueKey installs a runtime-generated rescue public key.
+// Used by main.go after constructing a Rescue: a binary signed by
+// the corresponding private half is accepted by Verify even if the
+// embedded release key has been rotated. Pass nil to clear.
+func (m *Manager) SetRescueKey(key ed25519.PublicKey) {
+	m.rescueKey = append(ed25519.PublicKey(nil), key...)
+}
+
 func decodeKey(s string) (ed25519.PublicKey, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

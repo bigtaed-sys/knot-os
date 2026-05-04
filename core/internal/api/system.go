@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,12 +35,22 @@ func (s *Server) MountSystem(r chi.Router) {
 	// before install.
 	r.Get("/system/update/check", s.handleUpdateCheck)
 	r.Post("/system/update/apply", s.handleUpdateApply)
+	// /system/update/rescue: per-device keypair management. /info
+	// shows whether the private key has been revealed yet; /reveal
+	// returns it once and then forever 410.
+	r.Get("/system/update/rescue", s.handleRescueInfo)
+	r.Post("/system/update/rescue/reveal", s.handleRescueReveal)
 }
 
 // SetUpdateManager wires the GitHub-driven update path into the API.
 // Pass nil (or skip the call) to disable the /system/update/check
 // and /apply endpoints — they then respond 503.
 func (s *Server) SetUpdateManager(m *update.Manager) { s.updater = m }
+
+// SetRescue wires the per-device rescue keypair into the API. The
+// rescue public key authorises self-built binaries via the update
+// manager; the private key is downloadable once via this API.
+func (s *Server) SetRescue(r *update.Rescue) { s.rescue = r }
 
 // SetProductionMode flips the gate that allows /system/{reboot,shutdown}
 // to actually execute. Off by default; main turns it on when running
@@ -73,88 +83,113 @@ func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
 	}()
 }
 
-// handleUpdate accepts a knotd binary upload as the request body,
-// validates it, atomically replaces the on-disk binary, and triggers
-// a systemd restart. The new binary takes over within seconds.
+// handleUpdate accepts a knotd binary upload, optionally with a
+// detached Ed25519 signature, atomically replaces the on-disk
+// binary, and triggers a systemd restart.
 //
-// Validation in v0.1 is minimal:
-//   - file must be non-empty and at least 1 MB (refuses obvious junk)
-//   - file must look like an ELF (magic 7f 45 4c 46)
+// Two content types are supported:
 //
-// Future hardening: signed updates with a public key baked into
-// /etc/knot/update.pub, version compatibility check, automatic
-// rollback on health-check failure.
+//   multipart/form-data        — preferred. Required parts:
+//                                  binary    : the new knotd
+//                                  signature : detached .sig (Ed25519
+//                                              over the binary bytes)
+//   application/octet-stream   — legacy raw upload. No signature is
+//                                supplied; the install proceeds only
+//                                when the running daemon was built
+//                                without a release key (dev). On a
+//                                production-keyed build the request
+//                                is rejected — use the multipart
+//                                form or call /system/update/apply
+//                                instead.
+//
+// Either path is delegated to update.Manager.VerifyAndInstall,
+// which is the same code path used by the GitHub auto-updater.
+// Restart in a goroutine so the response flushes before knotd dies.
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if !s.production {
 		writeError(w, http.StatusServiceUnavailable, "dev_mode", "update disabled in dev mode")
 		return
 	}
-	const (
-		minSize     = 1 << 20  // 1 MB — anything smaller can't be knotd
-		maxSize     = 64 << 20 // 64 MB — generous upper bound
-		targetPath  = "/usr/local/bin/knotd"
-		stagingDir  = "/var/lib/knot"
-		stagingName = ".knotd.update"
-	)
-
-	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, "staging_failed", err.Error())
+	if s.updater == nil {
+		writeError(w, http.StatusServiceUnavailable, "update_disabled", "update manager not configured")
 		return
 	}
 
-	staging := filepath.Join(stagingDir, stagingName)
-	out, err := os.OpenFile(staging, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	const maxBinarySize = 64 << 20
+	const maxSigSize = 1 << 20
+
+	binary, sig, err := readUpdateUpload(r, maxBinarySize, maxSigSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "staging_failed", err.Error())
-		return
-	}
-	defer func() { _ = out.Close() }()
-
-	limited := io.LimitReader(r.Body, maxSize+1)
-	n, err := io.Copy(out, limited)
-	if err != nil {
-		_ = os.Remove(staging)
-		writeError(w, http.StatusInternalServerError, "io", err.Error())
-		return
-	}
-	if n > maxSize {
-		_ = os.Remove(staging)
-		writeError(w, http.StatusRequestEntityTooLarge, "too_large",
-			fmt.Sprintf("uploaded file exceeds %d bytes", maxSize))
-		return
-	}
-	if n < minSize {
-		_ = os.Remove(staging)
-		writeError(w, http.StatusUnprocessableEntity, "too_small",
-			fmt.Sprintf("uploaded file is %d bytes; expected at least %d", n, minSize))
+		writeError(w, http.StatusBadRequest, "bad_upload", err.Error())
 		return
 	}
 
-	// ELF magic check — rejects accidental uploads of source code or
-	// images. Real signature verification arrives later.
-	if err := verifyELF(staging); err != nil {
-		_ = os.Remove(staging)
-		writeError(w, http.StatusUnprocessableEntity, "not_elf", err.Error())
+	if err := s.updater.VerifyAndInstall(binary, sig); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "install_rejected", err.Error())
 		return
 	}
 
-	// Atomic replace: rename onto target (same filesystem so this is
-	// a single inode swap, no half-written state on disk).
-	if err := os.Rename(staging, targetPath); err != nil {
-		writeError(w, http.StatusInternalServerError, "install_failed", err.Error())
-		return
-	}
-
-	// Acknowledge before restart — the response wouldn't get flushed
-	// after systemctl restarts us.
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":    true,
-		"bytes": n,
+		"bytes": len(binary),
 	})
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		_ = exec.Command("systemctl", "restart", "knotd").Run()
+		if err := s.updater.Restart(); err != nil {
+			fmt.Fprintf(os.Stderr, "update: restart after manual install: %v\n", err)
+		}
 	}()
+}
+
+// readUpdateUpload extracts the binary and (optional) signature
+// from a system/update request, supporting both content types
+// described above.
+func readUpdateUpload(r *http.Request, maxBinary, maxSig int64) (binary, sig []byte, err error) {
+	ct := r.Header.Get("Content-Type")
+	switch {
+	case strings.HasPrefix(ct, "multipart/form-data"):
+		// 65 MB cap on the whole upload; multipart adds boundary
+		// overhead but it's negligible.
+		if err := r.ParseMultipartForm(maxBinary + maxSig); err != nil {
+			return nil, nil, fmt.Errorf("parse multipart: %w", err)
+		}
+		binary, err = readFormFile(r, "binary", maxBinary)
+		if err != nil {
+			return nil, nil, fmt.Errorf("binary: %w", err)
+		}
+		sig, err = readFormFile(r, "signature", maxSig)
+		if err != nil && !errors.Is(err, http.ErrMissingFile) {
+			return nil, nil, fmt.Errorf("signature: %w", err)
+		}
+		return binary, sig, nil
+	case ct == "" || strings.HasPrefix(ct, "application/octet-stream"):
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBinary+1))
+		if err != nil {
+			return nil, nil, err
+		}
+		if int64(len(body)) > maxBinary {
+			return nil, nil, fmt.Errorf("binary exceeds %d bytes", maxBinary)
+		}
+		return body, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported Content-Type %q (use multipart/form-data or application/octet-stream)", ct)
+	}
+}
+
+func readFormFile(r *http.Request, name string, max int64) ([]byte, error) {
+	f, _, err := r.FormFile(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	body, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > max {
+		return nil, fmt.Errorf("%s exceeds %d bytes", name, max)
+	}
+	return body, nil
 }
 
 // handleUpdateCheck queries GitHub Releases for the latest knotd
@@ -207,6 +242,64 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(os.Stderr, "update: restart after apply: %v\n", err)
 		}
 	}()
+}
+
+// handleRescueInfo reports the rescue key state. Always safe to
+// call — the response carries the public key and a flag for whether
+// the private half is still available for download. The private
+// bytes themselves are never returned by this endpoint.
+func (s *Server) handleRescueInfo(w http.ResponseWriter, _ *http.Request) {
+	if s.rescue == nil {
+		writeError(w, http.StatusServiceUnavailable, "rescue_disabled", "rescue key not configured")
+		return
+	}
+	pub := s.rescue.PublicKey()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"public_key":      hexEncode(pub),
+		"private_available": s.rescue.HasPrivateKey(),
+	})
+}
+
+// handleRescueReveal returns the rescue private key as a hex string
+// exactly once. After this call the daemon overwrites its in-memory
+// copy with zeros and rewrites the on-disk file with revealed=true,
+// so a second call always 410s.
+//
+// The response shape is deliberately minimal: just a JSON object
+// with `private_key` containing 64 hex chars. The user is expected
+// to copy that into a password manager. No fancy file download
+// because Ed25519 private keys are tiny and copy-paste is the
+// least error-prone delivery method.
+func (s *Server) handleRescueReveal(w http.ResponseWriter, _ *http.Request) {
+	if s.rescue == nil {
+		writeError(w, http.StatusServiceUnavailable, "rescue_disabled", "rescue key not configured")
+		return
+	}
+	priv, err := s.rescue.RevealPrivateOnce()
+	if err != nil {
+		if errors.Is(err, update.ErrAlreadyRevealed) {
+			writeError(w, http.StatusGone, "rescue_already_revealed",
+				"the rescue private key was already shown — generate a new one to retry")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "rescue_reveal_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"private_key":  priv,
+		"public_key":   hexEncode(s.rescue.PublicKey()),
+		"warning":      "save this immediately — it cannot be retrieved again. Use it to sign self-built knotd binaries.",
+	})
+}
+
+func hexEncode(b []byte) string {
+	const hexdigits = "0123456789abcdef"
+	out := make([]byte, len(b)*2)
+	for i, v := range b {
+		out[i*2] = hexdigits[v>>4]
+		out[i*2+1] = hexdigits[v&0x0f]
+	}
+	return string(out)
 }
 
 // verifyELF reads the first 4 bytes of path and reports an error

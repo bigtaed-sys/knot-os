@@ -48,6 +48,7 @@ type Server struct {
 	tlsSubject      func() knottls.LeafSubject
 	sealer          config.Sealer
 	updater         *update.Manager
+	rescue          *update.Rescue
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool

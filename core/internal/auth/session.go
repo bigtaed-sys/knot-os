@@ -1,37 +1,132 @@
 package auth
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
-// SessionTTL is how long a login persists. Sessions live in memory only
-// — restarting knotd logs everyone out. That is acceptable given the
-// expected usage pattern (rare logins from the LAN) and avoids having
-// session state survive bad shutdowns.
+// SessionTTL is how long a login persists. Optionally persisted to
+// disk via NewSessionsAt — without that, sessions live in memory and
+// reset on knotd restart (which until v0.3 was the only behaviour
+// and worked fine for an extender, but felt rough whenever the
+// auto-update flow restarted the daemon out from under the user).
 const SessionTTL = 24 * time.Hour
 
 // Session is the server-side state behind a session cookie.
 type Session struct {
-	Token     string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Token     string    `json:"token"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // Sessions stores active session tokens. The zero value is not usable;
-// construct via NewSessions.
+// construct via NewSessions or NewSessionsAt.
 type Sessions struct {
-	mu      sync.Mutex
-	tokens  map[string]Session
-	now     func() time.Time
+	mu        sync.Mutex
+	tokens    map[string]Session
+	now       func() time.Time
+
+	// Optional on-disk persistence. When storePath is non-empty we
+	// flush the table to disk after every mutation; on startup
+	// NewSessionsAt loads the file (if present) so a knotd restart
+	// keeps users logged in.
+	storePath string
 }
 
-// NewSessions returns an empty session store.
+// NewSessions returns an empty in-memory session store.
 func NewSessions() *Sessions {
 	return &Sessions{
 		tokens: make(map[string]Session),
 		now:    time.Now,
 	}
+}
+
+// NewSessionsAt returns a session store backed by a JSON file at
+// path. Loads existing sessions on construction, drops expired ones
+// up front, and atomically rewrites the file after every mutation.
+//
+// A missing file is fine — first-run state. A malformed file is
+// logged via the returned error but the store still comes up with
+// an empty table; we don't want a corrupted persisted-sessions file
+// to make the daemon unbootable.
+func NewSessionsAt(path string) (*Sessions, error) {
+	s := &Sessions{
+		tokens:    make(map[string]Session),
+		now:       time.Now,
+		storePath: path,
+	}
+	if err := s.loadLocked(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return s, err
+	}
+	return s, nil
+}
+
+func (s *Sessions) loadLocked() error {
+	if s.storePath == "" {
+		return nil
+	}
+	b, err := os.ReadFile(s.storePath)
+	if err != nil {
+		return err
+	}
+	var raw map[string]Session
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("parse %s: %w", s.storePath, err)
+	}
+	now := s.now()
+	for tok, sess := range raw {
+		if now.Before(sess.ExpiresAt) {
+			s.tokens[tok] = sess
+		}
+	}
+	return nil
+}
+
+// flushLocked writes the current token map to storePath. Caller
+// must hold s.mu. Atomic via temp+rename. Best-effort: a write
+// failure is non-fatal — the in-memory state is still authoritative
+// and the next mutation will retry.
+func (s *Sessions) flushLocked() {
+	if s.storePath == "" {
+		return
+	}
+	dir := filepath.Dir(s.storePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".sessions-*.tmp")
+	if err != nil {
+		return
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	enc := json.NewEncoder(tmp)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(s.tokens); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return
+	}
+	_ = os.Rename(tmpName, s.storePath)
 }
 
 // Issue creates a fresh session and returns its token. The caller is
@@ -49,6 +144,7 @@ func (s *Sessions) Issue() (Session, error) {
 	}
 	s.mu.Lock()
 	s.tokens[token] = sess
+	s.flushLocked()
 	s.mu.Unlock()
 	return sess, nil
 }
@@ -68,6 +164,7 @@ func (s *Sessions) Lookup(token string) (Session, bool) {
 	}
 	if !now.Before(sess.ExpiresAt) {
 		delete(s.tokens, token)
+		s.flushLocked()
 		return Session{}, false
 	}
 	return sess, true
@@ -78,6 +175,7 @@ func (s *Sessions) Lookup(token string) (Session, bool) {
 func (s *Sessions) Revoke(token string) {
 	s.mu.Lock()
 	delete(s.tokens, token)
+	s.flushLocked()
 	s.mu.Unlock()
 }
 
@@ -86,6 +184,7 @@ func (s *Sessions) Revoke(token string) {
 func (s *Sessions) RevokeAll() {
 	s.mu.Lock()
 	s.tokens = make(map[string]Session)
+	s.flushLocked()
 	s.mu.Unlock()
 }
 

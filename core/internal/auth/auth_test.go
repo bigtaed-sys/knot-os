@@ -1,9 +1,84 @@
 package auth
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestSessionsPersistAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+
+	first, err := NewSessionsAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := first.Issue()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate restart: build a fresh Sessions from the same path.
+	second, err := NewSessionsAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := second.Lookup(sess.Token); !ok || got.Token != sess.Token {
+		t.Errorf("expected session to survive restart, got ok=%v token=%q", ok, got.Token)
+	}
+}
+
+func TestSessionsRevokeFlushes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+
+	first, _ := NewSessionsAt(path)
+	sess, _ := first.Issue()
+	first.Revoke(sess.Token)
+
+	second, _ := NewSessionsAt(path)
+	if _, ok := second.Lookup(sess.Token); ok {
+		t.Error("revoke should have removed session from disk too")
+	}
+}
+
+func TestSessionsMissingFileNoError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	s, err := NewSessionsAt(path)
+	if err != nil {
+		t.Fatalf("missing file should not error, got %v", err)
+	}
+	if s.Count() != 0 {
+		t.Errorf("expected empty store, got %d", s.Count())
+	}
+}
+
+func TestSessionsExpiredOnLoadDropped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+	// Hand-write a sessions file with one expired and one fresh entry.
+	expired := time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
+	fresh := time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+	body := `{
+		"e": {"token": "e", "created_at": "2026-05-01T00:00:00Z", "expires_at": "` + expired + `"},
+		"f": {"token": "f", "created_at": "2026-05-01T00:00:00Z", "expires_at": "` + fresh + `"}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSessionsAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Lookup("e"); ok {
+		t.Error("expired session should be dropped on load")
+	}
+	if _, ok := s.Lookup("f"); !ok {
+		t.Error("fresh session should be loaded")
+	}
+}
 
 func TestHashAndCheckPassword(t *testing.T) {
 	hash, err := HashPassword("correct-horse")

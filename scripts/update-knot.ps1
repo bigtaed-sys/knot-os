@@ -66,9 +66,13 @@ Write-Host ("    knotd: {0:N0} bytes" -f $size)
 # ---- 2a. HTTP transport -------------------------------------------------
 
 if ($PSCmdlet.ParameterSetName -eq 'Http') {
-    $base = "http://$Host"
-    if ($Host -notmatch '^https?://') { $base = "http://$Host" }
-    else { $base = $Host.TrimEnd('/') }
+    # $Address is the parameter; $Host is a PowerShell builtin
+    # (the host UI), do NOT use it.
+    if ($Address -match '^https?://') {
+        $base = $Address.TrimEnd('/')
+    } else {
+        $base = "http://$Address"
+    }
 
     if (-not $Password) {
         $Password = Read-Host -AsSecureString 'Admin password' |
@@ -86,22 +90,82 @@ if ($PSCmdlet.ParameterSetName -eq 'Http') {
         throw "login failed: $($login.StatusCode)"
     }
 
+    # Look for a sidecar signature next to the binary. Production
+    # release pipelines emit dist/arm64/knotd alongside .sig with
+    # the Ed25519 signature over the binary bytes. When the .sig
+    # is absent we fall back to the raw octet-stream upload — which
+    # the daemon accepts only on dev-key-empty builds.
+    $sigPath = "$binPath.sig"
+    $hasSig  = Test-Path $sigPath
+
     Write-Host '==> Uploading new knotd binary'
-    $bytes = [System.IO.File]::ReadAllBytes($binPath)
-    try {
-        $resp = Invoke-WebRequest -Uri "$base/api/system/update" `
-            -Method POST -Body $bytes `
-            -ContentType 'application/octet-stream' `
-            -WebSession $session -TimeoutSec 60
-        Write-Host ('==> Done. Server accepted ' + ($bytes.Length) + ' bytes; knotd will restart.')
-    } catch {
-        $err = $_.Exception.Response
-        if ($err) {
-            $reader = New-Object System.IO.StreamReader($err.GetResponseStream())
-            $body = $reader.ReadToEnd()
-            Write-Host "Server returned $($err.StatusCode):`n$body" -ForegroundColor Red
+    if ($hasSig) {
+        Write-Host "    using signed multipart upload (sig: $sigPath)"
+        # Build multipart/form-data manually so this works on both
+        # Windows PowerShell 5.1 and PowerShell 7+ (Invoke-WebRequest
+        # -Form needs Core only).
+        $boundary = "----knotd-update-$(([guid]::NewGuid()).ToString('N'))"
+        $LF = "`r`n"
+        $sigBytes  = [System.IO.File]::ReadAllBytes($sigPath)
+        $binBytes  = [System.IO.File]::ReadAllBytes($binPath)
+
+        $bodyStream = New-Object System.IO.MemoryStream
+        function _Write([byte[]]$b) { $bodyStream.Write($b, 0, $b.Length) }
+        $enc = [System.Text.Encoding]::ASCII
+
+        _Write $enc.GetBytes("--$boundary$LF")
+        _Write $enc.GetBytes('Content-Disposition: form-data; name="binary"; filename="knotd"' + $LF)
+        _Write $enc.GetBytes("Content-Type: application/octet-stream$LF$LF")
+        _Write $binBytes
+        _Write $enc.GetBytes($LF)
+
+        _Write $enc.GetBytes("--$boundary$LF")
+        _Write $enc.GetBytes('Content-Disposition: form-data; name="signature"; filename="knotd.sig"' + $LF)
+        _Write $enc.GetBytes("Content-Type: application/octet-stream$LF$LF")
+        _Write $sigBytes
+        _Write $enc.GetBytes($LF)
+
+        _Write $enc.GetBytes("--$boundary--$LF")
+
+        $body = $bodyStream.ToArray()
+        $bodyStream.Dispose()
+
+        try {
+            $resp = Invoke-WebRequest -Uri "$base/api/system/update" `
+                -Method POST -Body $body `
+                -ContentType "multipart/form-data; boundary=$boundary" `
+                -WebSession $session -TimeoutSec 120
+            Write-Host ('==> Done. Server accepted ' + ($binBytes.Length) +
+                ' bytes (signed); knotd will restart.')
+        } catch {
+            $err = $_.Exception.Response
+            if ($err) {
+                $reader = New-Object System.IO.StreamReader($err.GetResponseStream())
+                $body = $reader.ReadToEnd()
+                Write-Host "Server returned $($err.StatusCode):`n$body" -ForegroundColor Red
+            }
+            throw
         }
-        throw
+    } else {
+        Write-Host "    no .sig sidecar found at $sigPath — using legacy unsigned upload"
+        Write-Host "    (this fails on production-keyed builds; build with the release CI to get a .sig)"
+        $bytes = [System.IO.File]::ReadAllBytes($binPath)
+        try {
+            $resp = Invoke-WebRequest -Uri "$base/api/system/update" `
+                -Method POST -Body $bytes `
+                -ContentType 'application/octet-stream' `
+                -WebSession $session -TimeoutSec 60
+            Write-Host ('==> Done. Server accepted ' + ($bytes.Length) +
+                ' bytes (unsigned); knotd will restart.')
+        } catch {
+            $err = $_.Exception.Response
+            if ($err) {
+                $reader = New-Object System.IO.StreamReader($err.GetResponseStream())
+                $body = $reader.ReadToEnd()
+                Write-Host "Server returned $($err.StatusCode):`n$body" -ForegroundColor Red
+            }
+            throw
+        }
     }
     return
 }

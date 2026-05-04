@@ -316,6 +316,22 @@
 		"error_timeout": "GitHub did not respond in time. Check the device's internet and try again.",
 		"error_github": "Could not reach GitHub. Make sure the Pi has internet access."
 	},
+	"rescue": {
+		"section": "Rescue update key",
+		"subtitle": "Per-device Ed25519 key. A knotd binary signed by this key is accepted even if the upstream release key has been compromised. The private half is shown exactly once — save it somewhere safe.",
+		"public_key": "Public key",
+		"status": "Status",
+		"status_unrevealed": "private key still on device",
+		"status_revealed": "private key already delivered",
+		"reveal": "Reveal private key (one-shot)",
+		"revealing": "Fetching…",
+		"reveal_confirm": "Reveal the private key? This is irreversible — after the click the key is wiped from the device, only your copy remains. If you lose it you'll need to re-flash to generate a new one.",
+		"warning_one_shot": "Once you click, the private key disappears from the device forever. Save it immediately.",
+		"already_revealed_help": "The private key has been delivered. Only the public half remains here. To regenerate, delete /etc/knot/rescue.json and restart knotd.",
+		"private_key_label": "Private key (hex):",
+		"copy": "Copy",
+		"error_already_revealed": "Private key was already revealed earlier."
+	},
 	"common": {
 		"yes": "Yes",
 		"no": "No",
