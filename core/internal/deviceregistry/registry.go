@@ -26,6 +26,7 @@ type Registry struct {
 
 	storeFile string
 	leaseFile string
+	arpFile   string
 
 	// dirty flags whether in-memory state has diverged from storeFile.
 	// Cleared after a successful Flush.
@@ -46,6 +47,11 @@ type Options struct {
 	// integration (tests, dev mode).
 	LeaseFile string
 
+	// ARPFile is /proc/net/arp on Linux. Empty disables ARP-based
+	// liveness (tests, dev mode); Online() then falls back to
+	// "lease valid".
+	ARPFile string
+
 	Logger *log.Logger
 }
 
@@ -63,6 +69,7 @@ func NewRegistry(opts Options) *Registry {
 		devices:   make(map[string]*Device),
 		storeFile: opts.StoreFile,
 		leaseFile: opts.LeaseFile,
+		arpFile:   opts.ARPFile,
 		logger:    opts.Logger,
 	}
 }

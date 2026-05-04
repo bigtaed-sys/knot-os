@@ -116,6 +116,12 @@
 								{$_('devices.last_seen', { values: { ago: relativeTime(d.last_seen, now) } })}
 							</span>
 						{/if}
+						{#if d.stale}
+							<span class="badge badge-warn" title={$_('devices.stale_help')}>
+								<i class="bi bi-clock-history"></i>
+								{$_('devices.stale')}
+							</span>
+						{/if}
 					</div>
 					<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 flex items-center gap-3 flex-wrap">
 						<span>{d.mac}</span>

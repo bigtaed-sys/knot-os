@@ -73,6 +73,8 @@
 		"empty_help": "Devices will appear here once they connect to the Wi-Fi and get a DHCP lease.",
 		"online": "online",
 		"offline": "offline",
+		"stale": "stale",
+		"stale_help": "Device hasn't answered ARP for over 30 days. Likely won't reconnect with this MAC (iOS/Android rotate private MACs). Safe to remove via \"Forget device\".",
 		"last_seen": "seen {ago}",
 		"never": "never",
 		"just_now": "just now",

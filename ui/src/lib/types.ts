@@ -84,9 +84,11 @@ export interface Device {
 	display_name?: string;
 	ip?: string;
 	online: boolean;
+	stale: boolean;
 	lease_expires?: string;
 	first_seen: string;
 	last_seen: string;
+	last_arp_seen?: string;
 	profile_id?: string;
 }
 

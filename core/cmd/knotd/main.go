@@ -307,12 +307,15 @@ func main() {
 	// store of user-set names/profiles. Started here so the API has it
 	// from the first request.
 	leasePath := ""
+	arpPath := ""
 	if !*dev {
 		leasePath = "/var/lib/misc/dnsmasq.leases"
+		arpPath = deviceregistry.DefaultARPFile
 	}
 	devices := deviceregistry.NewRegistry(deviceregistry.Options{
 		StoreFile: "/etc/knot/devices.yaml",
 		LeaseFile: leasePath,
+		ARPFile:   arpPath,
 		Logger:    logger,
 	})
 	if err := devices.Load(); err != nil {
@@ -324,6 +327,12 @@ func main() {
 	if err := devices.StartLeaseWatcher(ctx); err != nil {
 		logger.Printf("deviceregistry watcher: %v", err)
 	}
+	// ARP watcher polls /proc/net/arp every 30s and updates each
+	// device's LastARPSeen. With that signal the per-device "online"
+	// pill in the UI flips off within minutes of a phone leaving
+	// the LAN, instead of staying green for the full 12-hour DHCP
+	// lease as it did in v0.2.
+	devices.StartARPWatcher(ctx)
 	logger.Printf("device registry: %d known", len(devices.List()))
 
 	// Profile registry: built-in + user profiles, persisted to YAML.

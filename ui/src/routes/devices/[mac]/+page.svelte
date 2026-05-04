@@ -171,6 +171,12 @@
 							{$_('devices.last_seen', { values: { ago: relativeTime(device.last_seen) } })}
 						</span>
 					{/if}
+					{#if device.stale}
+						<span class="badge badge-warn" title={$_('devices.stale_help')}>
+							<i class="bi bi-clock-history"></i>
+							{$_('devices.stale')}
+						</span>
+					{/if}
 					{#if device.profile_id}
 						<span class="badge badge-info">
 							<i class="bi bi-shield-check"></i>

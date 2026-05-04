@@ -54,8 +54,9 @@ func (s *Server) SetDeviceRegistry(d *deviceregistry.Registry) {
 	s.devices = d
 }
 
-// deviceJSON is the over-the-wire shape — has Label and Online
-// computed at serialization time, plus all persistable fields.
+// deviceJSON is the over-the-wire shape — has Label, Online, and
+// Stale computed at serialization time, plus the in-memory
+// LastARPSeen for transparency in the UI.
 type deviceJSON struct {
 	MAC          string    `json:"mac"`
 	Label        string    `json:"label"`
@@ -63,9 +64,11 @@ type deviceJSON struct {
 	DisplayName  string    `json:"display_name,omitempty"`
 	IP           string    `json:"ip,omitempty"`
 	Online       bool      `json:"online"`
+	Stale        bool      `json:"stale"`
 	LeaseExpires time.Time `json:"lease_expires,omitempty"`
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
+	LastARPSeen  time.Time `json:"last_arp_seen,omitempty"`
 	ProfileID    string    `json:"profile_id,omitempty"`
 }
 
@@ -77,9 +80,11 @@ func toJSON(d deviceregistry.Device, now time.Time) deviceJSON {
 		DisplayName:  d.DisplayName,
 		IP:           d.IP,
 		Online:       d.Online(now),
+		Stale:        d.Stale(now),
 		LeaseExpires: d.LeaseExpires,
 		FirstSeen:    d.FirstSeen,
 		LastSeen:     d.LastSeen,
+		LastARPSeen:  d.LastARPSeen,
 		ProfileID:    d.ProfileID,
 	}
 }
