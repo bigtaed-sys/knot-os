@@ -194,3 +194,35 @@ export interface RescueRevealed {
 	public_key: string;
 	warning: string;
 }
+
+// --- VPN (WireGuard road-warrior) -----------------------------------------
+
+export interface VPNServer {
+	enabled: boolean;
+	listen_port: number;
+	interface_cidr: string;
+	endpoint_host: string;
+	public_key: string;
+	peer_count: number;
+}
+
+export interface VPNPeer {
+	id: string;
+	name: string;
+	public_key: string;
+	allowed_ip: string;
+	profile_id?: string;
+	created_at: string;
+	last_handshake?: string;
+}
+
+export interface VPNPeersResponse {
+	peers: VPNPeer[];
+}
+
+export interface VPNAddPeerResponse {
+	peer: VPNPeer;
+	client_config: string;
+	private_key: string;
+	qr_png_base64: string;
+}

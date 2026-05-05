@@ -23,6 +23,7 @@
 		{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
 		{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
 		{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
+		{ path: '/vpn', icon: 'bi-globe-americas', label: 'nav.vpn' },
 		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
 	];

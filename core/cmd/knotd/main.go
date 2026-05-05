@@ -28,6 +28,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/secrets"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
+	"github.com/knot-os/knot-os/core/internal/vpn"
 )
 
 // schedulerDevices adapts deviceregistry.Registry to the scheduler's
@@ -502,6 +503,20 @@ func main() {
 	// LinuxBackend.
 	apiSrv.SetProductionMode(!*dev)
 
+	// WireGuard road-warrior server. Persisted in
+	// /etc/knot/wg.yaml; key generated on first boot. Apply hook
+	// below picks up the registry on every config-apply, so adding
+	// a peer in the UI takes effect within the same request.
+	wgRegistry, err := vpn.Open("/etc/knot/wg.yaml")
+	if err != nil {
+		logger.Printf("vpn: open registry: %v (VPN endpoints disabled)", err)
+	} else {
+		apiSrv.SetVPNRegistry(wgRegistry)
+		snap := wgRegistry.Server()
+		logger.Printf("vpn: server pub=%s peers=%d enabled=%v",
+			wgRegistry.PublicServerKey().String()[:11]+"…", len(wgRegistry.Peers()), snap.Enabled)
+	}
+
 	srvOpts := httpserver.Options{
 		Addr:   *listenAddr,
 		Logger: logger,
@@ -531,6 +546,19 @@ func main() {
 			}
 		}
 		srv.SetRedirectHTTPS(shouldRedirectHTTPS(applied, *dev, tlsActive))
+
+		// WireGuard apply: lives in the linux backend (build-tagged).
+		// In dev mode the type assertion fails and we silently skip
+		// — vpn endpoints still work, we just don't try to wg-quick.
+		if wgRegistry != nil {
+			if lb, ok := backend.(interface {
+				ApplyWireGuard(ctx context.Context, srv vpn.ServerConfig, peers []vpn.Peer) error
+			}); ok {
+				if err := lb.ApplyWireGuard(ctx, wgRegistry.Server(), wgRegistry.Peers()); err != nil {
+					logger.Printf("vpn: apply: %v", err)
+				}
+			}
+		}
 	})
 
 	if err := srv.Start(ctx); err != nil {

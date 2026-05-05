@@ -98,6 +98,35 @@ export async function apiPut<T>(path: string, body?: unknown, opts: RequestOpts 
 	return res.json() as Promise<T>;
 }
 
+export async function apiPatch<T>(path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+	const res = await doFetch(
+		path,
+		{
+			method: 'PATCH',
+			credentials: 'same-origin',
+			headers: { 'content-type': 'application/json' },
+			body: body === undefined ? undefined : JSON.stringify(body)
+		},
+		opts
+	);
+	if (!res.ok) {
+		throw new ApiError(`PATCH ${path} → ${res.status}`, res.status, await safeJson(res));
+	}
+	return res.json() as Promise<T>;
+}
+
+export async function apiDelete<T = unknown>(path: string, opts: RequestOpts = {}): Promise<T> {
+	const res = await doFetch(
+		path,
+		{ method: 'DELETE', credentials: 'same-origin' },
+		opts
+	);
+	if (!res.ok) {
+		throw new ApiError(`DELETE ${path} → ${res.status}`, res.status, await safeJson(res));
+	}
+	return res.json() as Promise<T>;
+}
+
 async function safeJson(res: Response): Promise<unknown> {
 	try {
 		return await res.json();

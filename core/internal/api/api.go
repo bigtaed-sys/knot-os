@@ -27,6 +27,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/profile"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
+	"github.com/knot-os/knot-os/core/internal/vpn"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -49,6 +50,7 @@ type Server struct {
 	sealer          config.Sealer
 	updater         *update.Manager
 	rescue          *update.Rescue
+	vpn             *vpn.Registry
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -128,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountProfiles(r)
 		s.MountDNS(r)
 		s.MountTLS(r)
+		s.MountVPN(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

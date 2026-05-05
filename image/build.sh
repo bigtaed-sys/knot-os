@@ -197,7 +197,8 @@ if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
             iw \
             wireless-regdb \
             isc-dhcp-client \
-            avahi-daemon
+            avahi-daemon \
+            wireguard-tools
         apt-get clean
         rm -rf /var/lib/apt/lists/*
     "
