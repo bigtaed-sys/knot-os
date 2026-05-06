@@ -30,8 +30,42 @@ const (
 )
 
 // Interface names. wlan0 is provided by the OS; ap0 is created by knotd
-// on phy0 at startup.
+// on phy0 at startup. ap_guest is the optional secondary BSS that
+// comes up only when a guest session is active.
 const (
-	IfaceWlan = "wlan0"
-	IfaceAP   = "ap0"
+	IfaceWlan     = "wlan0"
+	IfaceAP       = "ap0"
+	IfaceAPGuest  = "ap_guest"
 )
+
+// GuestLANCIDR is the dedicated /24 the guest BSS lives on. Distinct
+// from the main LAN so nftables can isolate it cleanly via source-IP
+// rules without parsing the BSS interface name on every packet.
+const GuestLANCIDR = "192.168.43.0/24"
+
+// GuestLANGateway is the .1 of GuestLANCIDR, served by knotd's
+// dnsmasq instance to guest clients via DHCP option 3.
+const GuestLANGateway = "192.168.43.1"
+
+// GuestLANPoolStart / GuestLANPoolEnd bracket the guest DHCP pool.
+const (
+	GuestLANPoolStart = "192.168.43.100"
+	GuestLANPoolEnd   = "192.168.43.200"
+)
+
+// GuestSessionProvider is the read-only side of guest.Registry that
+// the Linux backend cares about. Living in paths.go (no build tag)
+// means main.go on any OS can declare an adapter that satisfies it,
+// even though the Apply path that actually uses it only compiles on
+// Linux.
+type GuestSessionProvider interface {
+	CurrentGuestSession() ActiveGuestSession
+}
+
+// ActiveGuestSession is the per-Apply snapshot the backend reads
+// out of guest.Registry through the provider. Empty SSID means
+// "no active session — tear down any existing guest BSS".
+type ActiveGuestSession struct {
+	SSID string
+	PSK  string
+}

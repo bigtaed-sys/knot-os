@@ -78,6 +78,67 @@ func (b *LinuxBackend) removeAP(ctx context.Context) {
 	b.r.runIgnoreError(ctx, "iw", "dev", IfaceAP, "del")
 }
 
+// ensureAPGuest creates the ap_guest virtual interface for the
+// guest BSS. Lives on the same phy as the main AP (single-radio
+// constraint on Zero 2W; cohabitation is fine on Pi 4/5 too).
+//
+// MAC is derived from wlan0's MAC by flipping the LAA bit AND
+// bumping the second-to-last octet, so ap0 and ap_guest end up
+// with distinct unicast addresses. brcmfmac rejects duplicate
+// MACs across interfaces it manages.
+func (b *LinuxBackend) ensureAPGuest(ctx context.Context) error {
+	if interfaceExists(IfaceAPGuest) {
+		return nil
+	}
+	phy, err := findPhyForInterface(IfaceWlan)
+	if err != nil {
+		return fmt.Errorf("ensureAPGuest: %w", err)
+	}
+	if err := b.r.runOK(ctx, "iw", "phy", phy, "interface", "add", IfaceAPGuest, "type", "__ap"); err != nil {
+		return fmt.Errorf("ensureAPGuest: iw add: %w", err)
+	}
+	if mac, err := readMAC(IfaceWlan); err == nil {
+		if guestMAC, ok := guestMACFromBase(mac); ok {
+			if err := b.r.runOK(ctx, "ip", "link", "set", IfaceAPGuest, "address", guestMAC); err != nil {
+				b.logger.Printf("warn: setting %s MAC failed: %v", IfaceAPGuest, err)
+			}
+		}
+	}
+	return nil
+}
+
+// removeAPGuest tears the guest BSS interface down. Best-effort.
+func (b *LinuxBackend) removeAPGuest(ctx context.Context) {
+	if !interfaceExists(IfaceAPGuest) {
+		return
+	}
+	b.r.runIgnoreError(ctx, "iw", "dev", IfaceAPGuest, "del")
+}
+
+// guestMACFromBase derives a MAC for ap_guest from wlan0's MAC.
+// First octet has the LAA bit flipped (same as ap0) AND the
+// second-to-last octet incremented by 1 — yields a distinct value
+// from the ap0 MAC (which only flips LAA). Returns ok=false if the
+// input doesn't parse.
+func guestMACFromBase(mac string) (string, bool) {
+	parts := strings.Split(mac, ":")
+	if len(parts) != 6 {
+		return "", false
+	}
+	var first, fifth byte
+	if _, err := fmt.Sscanf(parts[0], "%x", &first); err != nil {
+		return "", false
+	}
+	if _, err := fmt.Sscanf(parts[4], "%x", &fifth); err != nil {
+		return "", false
+	}
+	first ^= 0x02
+	fifth ^= 0x01
+	parts[0] = fmt.Sprintf("%02x", first)
+	parts[4] = fmt.Sprintf("%02x", fifth)
+	return strings.Join(parts, ":"), true
+}
+
 // linkUp brings an interface up.
 func (b *LinuxBackend) linkUp(ctx context.Context, iface string) error {
 	return b.r.runOK(ctx, "ip", "link", "set", iface, "up")

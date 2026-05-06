@@ -10,6 +10,38 @@ import (
 	"github.com/knot-os/knot-os/core/internal/config"
 )
 
+// guestNftIface returns the guest interface name for nftables, or
+// "" when no guest BSS is active. Centralised so the apply paths
+// don't have to nil-check inline.
+func guestNftIface(g *HostapdGuestBSS) string {
+	if g == nil {
+		return ""
+	}
+	return g.Interface
+}
+
+// guestNftCIDR returns the guest /24 CIDR when active.
+func guestNftCIDR(g *HostapdGuestBSS) string {
+	if g == nil {
+		return ""
+	}
+	return GuestLANCIDR
+}
+
+// guestDnsmasqExtras returns dnsmasq's secondary-interface list for
+// the active guest BSS, or nil when none.
+func guestDnsmasqExtras(g *HostapdGuestBSS) []DnsmasqExtra {
+	if g == nil {
+		return nil
+	}
+	return []DnsmasqExtra{{
+		Interface:     g.Interface,
+		ListenIP:      GuestLANGateway,
+		DHCPPoolStart: GuestLANPoolStart,
+		DHCPPoolEnd:   GuestLANPoolEnd,
+	}}
+}
+
 // applyRouter brings the host into the wifi-router role.
 //
 // Topology (Pi Zero 2W or Pi 4/5 with USB-Ethernet):
@@ -102,8 +134,29 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		return fmt.Errorf("applyRouter: bring %s up: %w", IfaceWlan, err)
 	}
 
-	// 4. hostapd on wlan0 with the user-picked channel. Channel 0 means
-	//    "auto"; BuildHostapdConf falls back to channel 6.
+	// 4. Optional guest BSS — comes up only when a guest session is
+	//    active. Created BEFORE hostapd starts so the daemon sees
+	//    both interfaces ready and the multi-BSS config block in
+	//    hostapd.conf can reference ap_guest by name.
+	guest := b.activeGuest()
+	var guestBSS *HostapdGuestBSS
+	if guest.SSID != "" {
+		if err := b.ensureAPGuest(ctx); err != nil {
+			b.logger.Printf("applyRouter: ensureAPGuest: %v (continuing without guest BSS)", err)
+		} else {
+			guestBSS = &HostapdGuestBSS{
+				Interface: IfaceAPGuest,
+				SSID:      guest.SSID,
+				PSK:       guest.PSK,
+			}
+		}
+	} else {
+		b.removeAPGuest(ctx)
+	}
+
+	// 5. hostapd on wlan0 with the user-picked channel. Channel 0 means
+	//    "auto"; BuildHostapdConf falls back to channel 6. Guest BSS,
+	//    when set, is appended as a second [bss=ap_guest] section.
 	hostapdConf := BuildHostapdConf(HostapdParams{
 		Interface: IfaceWlan,
 		SSID:      cfg.Network.AP.SSID,
@@ -111,6 +164,7 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		Channel:   cfg.Network.AP.Channel,
 		Band:      cfg.Network.AP.Band,
 		PSK:       cfg.Network.AP.PSK,
+		Guest:     guestBSS,
 	})
 	if err := writeRuntimeFile(HostapdConfPath, hostapdConf); err != nil {
 		return err
@@ -122,13 +176,30 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		return fmt.Errorf("applyRouter: hostapd: %w", err)
 	}
 
-	// 5. dnsmasq on wlan0, DHCP only (knotd's resolver owns 53).
+	// Guest interface needs an IP, link up, and a DHCP scope so
+	// guests can actually use it once hostapd is talking. Idempotent;
+	// if the interface didn't come up the helper just no-ops.
+	if guestBSS != nil {
+		b.addrFlush(ctx, IfaceAPGuest)
+		if err := b.addrAdd(ctx, IfaceAPGuest, GuestLANGateway+"/"+cidrPrefix(GuestLANCIDR)); err != nil {
+			b.logger.Printf("applyRouter: guest addr: %v", err)
+		}
+		if err := b.linkUp(ctx, IfaceAPGuest); err != nil {
+			b.logger.Printf("applyRouter: guest link up: %v", err)
+		}
+	}
+
+	// 6. dnsmasq on wlan0 (and ap_guest when active), DHCP only —
+	//    knotd's resolver owns 53. The guest pool is appended as a
+	//    second `dhcp-range=<iface>,...` line; dnsmasq picks the
+	//    interface based on the DHCP request's source.
 	dnsmasqConf := BuildDnsmasqConf(DnsmasqParams{
 		Interface:     IfaceWlan,
 		ListenIP:      gw,
 		DHCPPoolStart: lan.DHCP.PoolStart,
 		DHCPPoolEnd:   lan.DHCP.PoolEnd,
 		DisableDNS:    true,
+		ExtraInterfaces: guestDnsmasqExtras(guestBSS),
 	})
 	if err := writeRuntimeFile(DnsmasqConfPath, dnsmasqConf); err != nil {
 		return err
@@ -149,9 +220,11 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		return fmt.Errorf("applyRouter: enable forwarding: %w", err)
 	}
 	rules := BuildNftablesRouter(RouterNftablesParams{
-		WANInterface: wan,
-		LANInterface: IfaceWlan,
-		LANCIDR:      lan.CIDR,
+		WANInterface:   wan,
+		LANInterface:   IfaceWlan,
+		LANCIDR:        lan.CIDR,
+		GuestInterface: guestNftIface(guestBSS),
+		GuestCIDR:      guestNftCIDR(guestBSS),
 	})
 	if err := b.applyNftables(ctx, rules); err != nil {
 		return fmt.Errorf("applyRouter: nftables: %w", err)

@@ -27,6 +27,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/profile"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
+	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 )
 
@@ -51,6 +52,7 @@ type Server struct {
 	updater         *update.Manager
 	rescue          *update.Rescue
 	vpn             *vpn.Registry
+	guest           *guest.Registry
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -104,6 +106,18 @@ func (s *Server) fireConfigApplied(cfg config.Config) {
 	}
 }
 
+// FireConfigApplied is the public entry point for callers outside
+// the api package (the guest-session expiry watcher in main.go,
+// for example) that want to nudge the apply chain without going
+// through PUT /api/config. Picks up the current snapshot under
+// the lock and invokes the registered callback.
+func (s *Server) FireConfigApplied() {
+	s.mu.RLock()
+	cfg := s.cfg
+	s.mu.RUnlock()
+	s.fireConfigApplied(cfg)
+}
+
 // Handler returns the http.Handler to mount at /api.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
@@ -131,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountDNS(r)
 		s.MountTLS(r)
 		s.MountVPN(r)
+		s.MountGuest(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

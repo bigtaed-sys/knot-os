@@ -28,6 +28,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/secrets"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
+	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 )
 
@@ -60,6 +61,22 @@ func (s schedulerProfiles) IsBlockingAt(id string, t time.Time) bool {
 type nopMACSetUpdater struct{}
 
 func (nopMACSetUpdater) UpdateBlockedMACs(_ []string) error { return nil }
+
+// guestProviderAdapter wraps guest.Registry to satisfy
+// netlinux.GuestSessionProvider. Single-method indirection keeps
+// the linux backend independent of the guest package's import.
+type guestProviderAdapter struct{ r *guest.Registry }
+
+func (a guestProviderAdapter) CurrentGuestSession() netlinux.ActiveGuestSession {
+	if a.r == nil {
+		return netlinux.ActiveGuestSession{}
+	}
+	cur := a.r.Current()
+	if !cur.Active(time.Now()) {
+		return netlinux.ActiveGuestSession{}
+	}
+	return netlinux.ActiveGuestSession{SSID: cur.SSID, PSK: cur.PSK}
+}
 
 // dnsDeviceLookup bridges deviceregistry + profile.Registry into
 // the dns.DeviceLookup interface: given a source IP, return the
@@ -515,6 +532,40 @@ func main() {
 		snap := wgRegistry.Server()
 		logger.Printf("vpn: server pub=%s peers=%d enabled=%v",
 			wgRegistry.PublicServerKey().String()[:11]+"…", len(wgRegistry.Peers()), snap.Enabled)
+	}
+
+	// Guest network registry. Single active session at a time,
+	// auto-expires via a 30s sweeper. Apply callback below maps
+	// the active session into the hostapd multi-BSS config.
+	guestRegistry, err := guest.Open("/etc/knot/guest.yaml")
+	if err != nil {
+		logger.Printf("guest: open registry: %v (guest endpoints disabled)", err)
+	} else {
+		apiSrv.SetGuestRegistry(guestRegistry)
+		// Hand the registry to the Linux backend so applyRouter can
+		// pull the live session on every Apply.
+		if lb, ok := backend.(*netlinux.LinuxBackend); ok {
+			lb.SetGuestProvider(guestProviderAdapter{r: guestRegistry})
+		}
+		// Watcher: every 30s clear expired sessions, then re-apply
+		// so the BSS gets torn down without waiting for a manual
+		// trigger. Idempotent — if nothing expired, fireConfigApplied
+		// just walks through unchanged inputs.
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case now := <-t.C:
+					if guestRegistry.SweepExpired(now) {
+						logger.Printf("guest: session expired, tearing down BSS")
+						apiSrv.FireConfigApplied()
+					}
+				}
+			}
+		}()
 	}
 
 	srvOpts := httpserver.Options{

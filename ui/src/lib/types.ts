@@ -195,6 +195,17 @@ export interface RescueRevealed {
 	warning: string;
 }
 
+export interface GuestSession {
+	ssid: string;
+	psk: string;
+	created_at: string;
+	expires_at?: string;
+	remaining_sec: number;
+	profile_id?: string;
+	wifi_qr: string;
+	qr_png_base64: string;
+}
+
 // --- VPN (WireGuard road-warrior) -----------------------------------------
 
 export interface VPNServer {

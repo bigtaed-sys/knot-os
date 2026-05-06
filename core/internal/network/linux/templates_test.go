@@ -89,7 +89,7 @@ func TestDnsmasqCaptivePortal(t *testing.T) {
 	mustContain(t, out,
 		"interface=ap0",
 		"listen-address=192.168.42.1",
-		"dhcp-range=192.168.42.100,192.168.42.200,12h",
+		"dhcp-range=set:lan,192.168.42.100,192.168.42.200,12h",
 		"address=/#/192.168.42.1",
 	)
 }
@@ -144,6 +144,51 @@ func TestNftablesRouterUsesEthWAN(t *testing.T) {
 		"established,related",
 		"set blocked_macs",
 		"ether saddr @blocked_macs drop",
+	)
+}
+
+func TestNftablesRouterIsolatesGuestBSS(t *testing.T) {
+	out := BuildNftablesRouter(RouterNftablesParams{
+		WANInterface:   "eth0",
+		LANInterface:   "wlan0",
+		LANCIDR:        "192.168.42.0/24",
+		GuestInterface: "ap_guest",
+		GuestCIDR:      "192.168.43.0/24",
+	})
+	mustContain(t, out,
+		// Guest can reach WAN (and replies come back).
+		`iifname "ap_guest" oifname "eth0" accept`,
+		`iifname "eth0" oifname "ap_guest" ct state established,related accept`,
+		// Guest is hard-walled off from the main LAN both directions.
+		`iifname "ap_guest" oifname "wlan0" drop`,
+		`iifname "wlan0" oifname "ap_guest" drop`,
+		// Guest source IPs masqueraded out the WAN.
+		`ip saddr 192.168.43.0/24 oifname "eth0" masquerade`,
+	)
+}
+
+func TestHostapdConfWithGuestBSS(t *testing.T) {
+	out := BuildHostapdConf(HostapdParams{
+		Interface: "ap0",
+		SSID:      "KnotNet",
+		Country:   "RU",
+		Channel:   6,
+		Band:      "2.4",
+		PSK:       "main-secret",
+		Guest: &HostapdGuestBSS{
+			Interface: "ap_guest",
+			SSID:      "KnotNet-guest",
+			PSK:       "guest-pass-12",
+		},
+	})
+	mustContain(t, out,
+		"interface=ap0",
+		"ssid=KnotNet",
+		"wpa_passphrase=main-secret",
+		"bss=ap_guest",
+		"ssid=KnotNet-guest",
+		"wpa_passphrase=guest-pass-12",
+		"ap_isolate=1",
 	)
 }
 

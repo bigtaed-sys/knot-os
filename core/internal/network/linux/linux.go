@@ -37,9 +37,33 @@ type LinuxBackend struct {
 	wpaSupp      *supervisedProc
 	dnsmasq      *supervisedProc
 
+	// guestProvider, when non-nil, is queried on every Apply for
+	// the currently-active guest session. The session drives a
+	// secondary BSS in hostapd and isolation rules in nftables.
+	// Decoupled as an interface so the linux backend has no import
+	// dependency on the guest package itself.
+	guestProvider GuestSessionProvider
+
 	mu      sync.Mutex
 	current config.Config
 	hasCfg  bool
+}
+
+// SetGuestProvider wires a registry into the backend. Pass nil to
+// disable guest BSS entirely. Type definitions for the provider
+// interface live in paths.go so non-Linux dev builds still see them.
+func (b *LinuxBackend) SetGuestProvider(p GuestSessionProvider) {
+	b.guestProvider = p
+}
+
+// activeGuest returns the current session or zero value (nothing
+// active). Centralised here so the apply paths don't have to
+// nil-check the provider individually.
+func (b *LinuxBackend) activeGuest() ActiveGuestSession {
+	if b.guestProvider == nil {
+		return ActiveGuestSession{}
+	}
+	return b.guestProvider.CurrentGuestSession()
 }
 
 // Options configures New.

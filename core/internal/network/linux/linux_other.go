@@ -60,3 +60,7 @@ func (b *LinuxBackend) Close() {}
 func (b *LinuxBackend) UpdateBlockedMACs(_ []string) error {
 	return errors.New("LinuxBackend is only available on Linux")
 }
+
+// SetGuestProvider is a no-op on non-Linux platforms — the apply
+// paths that consume it are linux-only anyway.
+func (b *LinuxBackend) SetGuestProvider(_ GuestSessionProvider) {}
