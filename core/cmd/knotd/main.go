@@ -122,6 +122,21 @@ func shouldRedirectHTTPS(cfg config.Config, devMode bool, tlsEnabled bool) bool 
 //	role=wifi-extender    → "<gateway>:53"
 //	role=wifi-router      → "<gateway>:53"
 //	dev mode              → "" (no port 53 binding on a developer's box)
+// dnsUpstreamFromConfig translates the cfg.Network.DNS block (or
+// nil) into the (mode, upstreams) pair the resolver expects. nil
+// or empty mode means UDP plain — back-compat with v0.3 configs.
+func dnsUpstreamFromConfig(cfg config.Config) (knotdns.UpstreamMode, []string) {
+	d := cfg.Network.DNS
+	if d == nil {
+		return knotdns.UpstreamModeUDP, nil
+	}
+	mode := knotdns.UpstreamMode(d.Mode)
+	if mode == "" {
+		mode = knotdns.UpstreamModeUDP
+	}
+	return mode, append([]string(nil), d.Upstreams...)
+}
+
 func dnsListenForRole(cfg config.Config, devMode bool) string {
 	if devMode {
 		return ""
@@ -401,13 +416,16 @@ func main() {
 	// derived from the current role (empty in setup mode where
 	// dnsmasq's own DNS catch-all owns port 53; gateway:53 in
 	// wifi-extender mode where dnsmasq is configured port=0).
+	dnsMode, dnsUpstreams := dnsUpstreamFromConfig(cfg)
 	dnsServer := knotdns.New(knotdns.Options{
-		Listen:     dnsListenForRole(cfg, *dev),
-		Blocklists: dnsBlocklists,
-		Devices:    dnsDeviceLookup{devices: devices, profiles: profiles},
-		Log:        dnsLog,
-		Cache:      dnsCache,
-		Logger:     logger,
+		Listen:       dnsListenForRole(cfg, *dev),
+		Blocklists:   dnsBlocklists,
+		Devices:      dnsDeviceLookup{devices: devices, profiles: profiles},
+		Log:          dnsLog,
+		Cache:        dnsCache,
+		UpstreamMode: dnsMode,
+		Upstreams:    dnsUpstreams,
+		Logger:       logger,
 	})
 	go func() {
 		if err := dnsServer.Run(ctx); err != nil {
@@ -588,6 +606,10 @@ func main() {
 	//   - HTTPS redirect on/off (setup → wifi-* flips it on)
 	apiSrv.SetOnConfigApplied(func(applied config.Config) {
 		dnsServer.SetListen(dnsListenForRole(applied, *dev))
+		// Pick up any DNS upstream changes (mode + URL list) the
+		// user just made. Idempotent when nothing changed.
+		mode, upstreams := dnsUpstreamFromConfig(applied)
+		dnsServer.SetUpstreams(mode, upstreams)
 		if applied.Role == config.RoleWiFiExtender || applied.Role == config.RoleWiFiRouter {
 			dnsDownloader.RefreshNow()
 		}

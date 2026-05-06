@@ -63,8 +63,18 @@ type Options struct {
 	// Listen is the address+port to bind ("192.168.42.1:53"). Empty
 	// disables the resolver entirely (useful in dev / tests).
 	Listen string
-	// Upstreams is the list of "host:port" upstream resolvers tried
-	// in order. Empty falls back to DefaultUpstreams.
+	// UpstreamMode picks the wire transport for upstream queries.
+	// "udp" (default) keeps the v0.2 behaviour of plain RFC 1035.
+	// "doh" runs every query over HTTPS to a provider's
+	// /dns-query endpoint.
+	UpstreamMode UpstreamMode
+	// Upstreams is the list of upstream resolvers tried in order.
+	// Format depends on UpstreamMode:
+	//
+	//   udp → "host:port"  (e.g. "1.1.1.1:53")
+	//   doh → full URL     (e.g. "https://cloudflare-dns.com/dns-query")
+	//
+	// Empty falls back to the matching default list.
 	Upstreams []string
 	// Blocklists is the registry the resolver looks blocklist names
 	// up in. Required.
@@ -93,6 +103,11 @@ type Options struct {
 type Server struct {
 	opts Options
 
+	// doh is the DoH client used when UpstreamMode == UpstreamModeDoH.
+	// Holds a TLS+HTTP/2 connection pool so per-query latency on hot
+	// upstreams is one RTT.
+	doh *DoHClient
+
 	mu     sync.Mutex
 	listen string
 	udp    *mdns.Server
@@ -104,8 +119,16 @@ func New(opts Options) *Server {
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
 	}
+	if opts.UpstreamMode == "" {
+		opts.UpstreamMode = UpstreamModeUDP
+	}
 	if len(opts.Upstreams) == 0 {
-		opts.Upstreams = append([]string(nil), DefaultUpstreams...)
+		switch opts.UpstreamMode {
+		case UpstreamModeDoH:
+			opts.Upstreams = append([]string(nil), DefaultDoHUpstreams...)
+		default:
+			opts.Upstreams = append([]string(nil), DefaultUpstreams...)
+		}
 	}
 	if opts.Devices == nil {
 		opts.Devices = nopLookup{}
@@ -113,7 +136,36 @@ func New(opts Options) *Server {
 	if opts.Log == nil {
 		opts.Log = nopLog{}
 	}
-	return &Server{opts: opts, listen: opts.Listen}
+	s := &Server{opts: opts, listen: opts.Listen}
+	if opts.UpstreamMode == UpstreamModeDoH {
+		s.doh = NewDoHClient()
+	}
+	return s
+}
+
+// SetUpstreams atomically swaps mode + upstreams at runtime. Used
+// by the API when the user picks a different DNS provider in the
+// UI — the resolver picks up the change on the very next query.
+func (s *Server) SetUpstreams(mode UpstreamMode, upstreams []string) {
+	if mode == "" {
+		mode = UpstreamModeUDP
+	}
+	s.mu.Lock()
+	s.opts.UpstreamMode = mode
+	if len(upstreams) == 0 {
+		switch mode {
+		case UpstreamModeDoH:
+			upstreams = append([]string(nil), DefaultDoHUpstreams...)
+		default:
+			upstreams = append([]string(nil), DefaultUpstreams...)
+		}
+	}
+	s.opts.Upstreams = append([]string(nil), upstreams...)
+	if mode == UpstreamModeDoH && s.doh == nil {
+		s.doh = NewDoHClient()
+	}
+	s.mu.Unlock()
+	s.opts.Logger.Printf("dns: upstreams switched to mode=%s, %d entries", mode, len(upstreams))
 }
 
 // Run blocks until ctx is cancelled, keeping the listeners (if any)
@@ -296,9 +348,30 @@ func (s *Server) findBlocking(qname string, blocklists []string) string {
 }
 
 func (s *Server) forward(r *mdns.Msg) (*mdns.Msg, error) {
+	s.mu.Lock()
+	mode := s.opts.UpstreamMode
+	upstreams := append([]string(nil), s.opts.Upstreams...)
+	doh := s.doh
+	s.mu.Unlock()
+
+	if mode == UpstreamModeDoH {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer cancel()
+		var lastErr error
+		for _, up := range upstreams {
+			resp, err := doh.Exchange(ctx, r, up)
+			if err == nil {
+				return resp, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
+	}
+
+	// Default: plain UDP RFC 1035.
 	c := &mdns.Client{Net: "udp", Timeout: 4 * time.Second}
 	var lastErr error
-	for _, up := range s.opts.Upstreams {
+	for _, up := range upstreams {
 		resp, _, err := c.Exchange(r, up)
 		if err == nil {
 			return resp, nil

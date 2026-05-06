@@ -2,17 +2,22 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, apiPost, ApiError } from '$lib/api';
+	import { apiGet, apiPost, apiPatch, ApiError } from '$lib/api';
 	import { relativeTime } from '$lib/format';
 	import type {
 		DNSStats,
 		DNSQuery,
 		DNSQueriesResponse,
+		DNSUpstream,
 		Device,
 		DevicesResponse
 	} from '$lib/types';
 
 	let stats = $state<DNSStats | null>(null);
+	let upstream = $state<DNSUpstream | null>(null);
+	let upstreamSaving = $state(false);
+	let upstreamMessage = $state<string | null>(null);
+	let customUpstreamsText = $state('');
 	let queries = $state<DNSQuery[]>([]);
 	let devicesByMAC = $state<Record<string, Device>>({});
 	let loading = $state(true);
@@ -26,6 +31,72 @@
 
 	async function loadStats() {
 		stats = await apiGet<DNSStats>('/dns/stats');
+	}
+	async function loadUpstream() {
+		try {
+			upstream = await apiGet<DNSUpstream>('/dns/upstream');
+			customUpstreamsText = (upstream.upstreams ?? []).join('\n');
+		} catch {
+			// Endpoint 503 in setup mode etc — silent fallback to "no
+			// upstream control here", section just won't render.
+			upstream = null;
+		}
+	}
+	async function setMode(mode: 'udp' | 'doh') {
+		if (!upstream || upstream.mode === mode) return;
+		upstreamSaving = true;
+		upstreamMessage = null;
+		try {
+			upstream = await apiPatch<DNSUpstream>('/dns/upstream', {
+				mode,
+				reset_upstreams: true
+			});
+			customUpstreamsText = (upstream.upstreams ?? []).join('\n');
+		} catch (e) {
+			upstreamMessage = e instanceof Error ? e.message : String(e);
+		} finally {
+			upstreamSaving = false;
+		}
+	}
+	async function saveCustomUpstreams() {
+		if (!upstream) return;
+		const list = customUpstreamsText
+			.split(/[\s,]+/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+		upstreamSaving = true;
+		upstreamMessage = null;
+		try {
+			upstream = await apiPatch<DNSUpstream>('/dns/upstream', {
+				upstreams: list
+			});
+			upstreamMessage = $_('protection.upstream_saved');
+			setTimeout(() => (upstreamMessage = null), 2000);
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				upstreamMessage = body?.error?.message ?? e.message;
+			} else if (e instanceof Error) {
+				upstreamMessage = e.message;
+			}
+		} finally {
+			upstreamSaving = false;
+		}
+	}
+	async function resetUpstreams() {
+		upstreamSaving = true;
+		try {
+			upstream = await apiPatch<DNSUpstream>('/dns/upstream', {
+				reset_upstreams: true
+			});
+			customUpstreamsText = '';
+			upstreamMessage = $_('protection.upstream_reset_done');
+			setTimeout(() => (upstreamMessage = null), 2000);
+		} catch (e) {
+			upstreamMessage = e instanceof Error ? e.message : String(e);
+		} finally {
+			upstreamSaving = false;
+		}
 	}
 	async function loadQueries() {
 		const r = await apiGet<DNSQueriesResponse>('/dns/queries?limit=100');
@@ -45,7 +116,7 @@
 	async function refresh(initial = false) {
 		if (initial) loading = true;
 		try {
-			await Promise.all([loadStats(), loadQueries(), loadDevices()]);
+			await Promise.all([loadStats(), loadQueries(), loadDevices(), loadUpstream()]);
 			error = null;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
@@ -277,6 +348,102 @@
 			{/if}
 		</section>
 	</div>
+
+	<!-- DNS upstream -->
+	{#if upstream}
+		<section class="surface p-5 mb-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-globe-americas text-brand-500"></i>
+				{$_('protection.upstream_section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+				{$_('protection.upstream_subtitle')}
+			</p>
+
+			<div class="flex flex-wrap gap-3 mb-4">
+				<button
+					type="button"
+					class="flex-1 min-w-[180px] text-left p-4 rounded-xl border-2 transition-colors
+						{upstream.mode === 'udp'
+							? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'}"
+					disabled={upstreamSaving}
+					onclick={() => setMode('udp')}
+				>
+					<div class="flex items-center gap-2">
+						<i class="bi bi-broadcast text-brand-500"></i>
+						<span class="font-semibold">{$_('protection.upstream_mode_udp')}</span>
+					</div>
+					<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+						{$_('protection.upstream_mode_udp_help')}
+					</p>
+				</button>
+				<button
+					type="button"
+					class="flex-1 min-w-[180px] text-left p-4 rounded-xl border-2 transition-colors
+						{upstream.mode === 'doh'
+							? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'}"
+					disabled={upstreamSaving}
+					onclick={() => setMode('doh')}
+				>
+					<div class="flex items-center gap-2">
+						<i class="bi bi-shield-lock-fill text-brand-500"></i>
+						<span class="font-semibold">{$_('protection.upstream_mode_doh')}</span>
+					</div>
+					<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+						{$_('protection.upstream_mode_doh_help')}
+					</p>
+				</button>
+			</div>
+
+			<div>
+				<label class="text-sm font-medium" for="up-list">
+					{$_('protection.upstream_list_label')}
+				</label>
+				<textarea
+					id="up-list"
+					class="input mt-1 font-mono text-xs"
+					rows="3"
+					placeholder={(upstream.defaults ?? []).join('\n')}
+					bind:value={customUpstreamsText}
+					disabled={upstreamSaving}
+				></textarea>
+				<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+					{upstream.mode === 'doh'
+						? $_('protection.upstream_list_help_doh')
+						: $_('protection.upstream_list_help_udp')}
+				</p>
+				<div class="flex flex-wrap gap-2 mt-3">
+					<button
+						class="btn-primary"
+						disabled={upstreamSaving}
+						onclick={saveCustomUpstreams}
+					>
+						{#if upstreamSaving}
+							<span class="spinner"></span>
+						{:else}
+							<i class="bi bi-check2"></i>
+						{/if}
+						{$_('protection.upstream_save')}
+					</button>
+					<button
+						class="btn-ghost"
+						disabled={upstreamSaving}
+						onclick={resetUpstreams}
+					>
+						<i class="bi bi-arrow-counterclockwise"></i>
+						{$_('protection.upstream_reset')}
+					</button>
+				</div>
+				{#if upstreamMessage}
+					<div class="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+						{upstreamMessage}
+					</div>
+				{/if}
+			</div>
+		</section>
+	{/if}
 
 	<!-- Queries -->
 	<section class="surface p-5">

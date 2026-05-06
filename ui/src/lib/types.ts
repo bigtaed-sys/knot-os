@@ -195,6 +195,12 @@ export interface RescueRevealed {
 	warning: string;
 }
 
+export interface DNSUpstream {
+	mode: 'udp' | 'doh' | string;
+	upstreams: string[];
+	defaults: string[];
+}
+
 export interface GuestSession {
 	ssid: string;
 	psk: string;

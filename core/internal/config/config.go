@@ -65,6 +65,21 @@ type Network struct {
 	// WAN is the upstream interface for the wifi-router role.
 	// Empty in setup and extender roles.
 	WAN *WAN `yaml:"wan,omitempty" json:"wan,omitempty"`
+	// DNS controls how the resolver forwards queries upstream.
+	// Empty/nil keeps the v0.3 default of plain UDP to 1.1.1.1 +
+	// 8.8.8.8.
+	DNS *DNSUpstream `yaml:"dns,omitempty" json:"dns,omitempty"`
+}
+
+// DNSUpstream picks the wire transport for upstream DNS plus an
+// optional override list.
+type DNSUpstream struct {
+	// Mode is "udp" (default) or "doh". Empty == "udp".
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Upstreams is an optional override; empty means "use the
+	// built-in defaults for the chosen mode" (Cloudflare + Google
+	// for UDP, Cloudflare + Quad9 for DoH).
+	Upstreams []string `yaml:"upstreams,omitempty" json:"upstreams,omitempty"`
 }
 
 // WiFiUplink is the configuration of the upstream Wi-Fi connection.
