@@ -102,6 +102,32 @@
 		displayName = device?.hostname ?? '';
 	}
 
+	let waking = $state(false);
+	let wakeMsg = $state<string | null>(null);
+	async function wakeDevice() {
+		if (!device || waking) return;
+		waking = true;
+		wakeMsg = null;
+		try {
+			const res = await fetch(`${API_BASE}/devices/${encodeURIComponent(mac)}/wake`, {
+				method: 'POST',
+				credentials: 'same-origin'
+			});
+			if (!res.ok) {
+				const body = (await res.json().catch(() => null)) as
+					| { error?: { message?: string } }
+					| null;
+				throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+			}
+			wakeMsg = $_('devices.wake_sent');
+			setTimeout(() => (wakeMsg = null), 4000);
+		} catch (err) {
+			wakeMsg = err instanceof Error ? err.message : String(err);
+		} finally {
+			waking = false;
+		}
+	}
+
 	async function forgetDevice() {
 		if (!device) return;
 		const label = device.label;
@@ -311,6 +337,36 @@
 			</div>
 		{/if}
 	</section>
+
+	<!-- Wake-on-LAN: only when offline (no point waking an already-up box). -->
+	{#if !device.online}
+		<section class="surface p-5 mt-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-power text-emerald-500"></i>
+				{$_('devices.wake_section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-3">
+				{$_('devices.wake_help')}
+			</p>
+			<button
+				type="button"
+				class="btn-ghost"
+				disabled={waking}
+				onclick={wakeDevice}
+			>
+				{#if waking}
+					<span class="spinner"></span>
+					{$_('devices.waking')}
+				{:else}
+					<i class="bi bi-broadcast"></i>
+					{$_('devices.wake')}
+				{/if}
+			</button>
+			{#if wakeMsg}
+				<div class="mt-3 text-sm text-zinc-600 dark:text-zinc-300">{wakeMsg}</div>
+			{/if}
+		</section>
+	{/if}
 
 	<!-- Forget / remove device -->
 	{#if !device.online}

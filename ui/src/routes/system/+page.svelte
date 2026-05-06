@@ -8,7 +8,8 @@
 		TLSInfo,
 		UpdateCheckResult,
 		RescueInfo,
-		RescueRevealed
+		RescueRevealed,
+		ChannelReport
 	} from '$lib/types';
 
 	let status = $state<SystemStatus | null>(null);
@@ -25,6 +26,52 @@
 	let updChecking = $state(false);
 	let updApplying = $state(false);
 	let updError = $state<string | null>(null);
+
+	// Channel scanner state.
+	let chReport = $state<ChannelReport | null>(null);
+	let chScanning = $state(false);
+	let chApplying = $state(false);
+	let chError = $state<string | null>(null);
+
+	async function scanChannels() {
+		chScanning = true;
+		chError = null;
+		try {
+			// 30s timeout: iw scan on a busy radio that's also serving
+			// the AP can take 10–20s on Zero 2W.
+			chReport = await apiGet<ChannelReport>('/network/channels', { timeoutMs: 30000 });
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				chError = body?.error?.message ?? e.message;
+			} else if (e instanceof Error) {
+				chError = e.message;
+			}
+		} finally {
+			chScanning = false;
+		}
+	}
+
+	async function applyChannel(ch: number) {
+		if (!chReport || chApplying) return;
+		chApplying = true;
+		chError = null;
+		try {
+			await apiPost('/network/channels/apply', { channel: ch });
+			// Re-pull report so the "current_channel" marker moves to the
+			// freshly-applied channel.
+			chReport = await apiGet<ChannelReport>('/network/channels', { timeoutMs: 30000 });
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				chError = body?.error?.message ?? e.message;
+			} else if (e instanceof Error) {
+				chError = e.message;
+			}
+		} finally {
+			chApplying = false;
+		}
+	}
 
 	// Rescue keypair state.
 	let rescue = $state<RescueInfo | null>(null);
@@ -297,6 +344,93 @@
 				</button>
 			</div>
 			<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-3">{$_('security.install_help')}</p>
+		</section>
+	{/if}
+
+	<!-- Channel scanner -->
+	{#if status && status.role === 'wifi-router'}
+		<section class="surface p-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-graph-up text-brand-500"></i>
+				{$_('channels.section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">{$_('channels.subtitle')}</p>
+
+			<div class="flex flex-wrap gap-3 mb-4">
+				<button class="btn-primary" onclick={scanChannels} disabled={chScanning || chApplying}>
+					{#if chScanning}
+						<span class="spinner"></span>
+						{$_('channels.scanning')}
+					{:else}
+						<i class="bi bi-search"></i>
+						{$_('channels.scan')}
+					{/if}
+				</button>
+			</div>
+
+			{#if chReport}
+				{@const max = chReport.channels.reduce((m, c) => Math.max(m, c.score), 0.001)}
+				<div class="space-y-1">
+					{#each chReport.channels as c}
+						<div class="flex items-center gap-3">
+							<span class="w-6 text-right text-xs font-mono tabular-nums text-zinc-500">
+								{c.channel}
+							</span>
+							<div class="flex-1 h-5 bg-zinc-100 dark:bg-zinc-800 rounded overflow-hidden">
+								<div
+									class="h-full transition-all
+										{c.recommended
+											? 'bg-emerald-400'
+											: c.channel === chReport?.current_channel
+												? 'bg-brand-400'
+												: 'bg-rose-400 opacity-60'}"
+									style="width: {(c.score / max) * 100}%"
+								></div>
+							</div>
+							<span class="text-xs text-zinc-500 w-16 text-right tabular-nums">
+								{c.networks > 0 ? `${c.networks} AP` : '—'}
+							</span>
+							{#if c.recommended}
+								<span class="badge badge-ok">{$_('channels.recommended')}</span>
+							{:else if c.channel === chReport.current_channel}
+								<span class="badge badge-info">{$_('channels.current')}</span>
+							{/if}
+						</div>
+					{/each}
+				</div>
+
+				{#if chReport.recommended !== chReport.current_channel}
+					<div class="mt-4 flex flex-wrap items-center gap-3">
+						<button
+							class="btn-primary"
+							disabled={chApplying}
+							onclick={() => applyChannel(chReport!.recommended)}
+						>
+							{#if chApplying}
+								<span class="spinner"></span>
+								{$_('channels.applying')}
+							{:else}
+								<i class="bi bi-arrow-right-circle"></i>
+								{$_('channels.apply', { values: { channel: chReport.recommended } })}
+							{/if}
+						</button>
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 max-w-md">
+							{$_('channels.apply_help')}
+						</p>
+					</div>
+				{:else}
+					<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-4">
+						{$_('channels.already_optimal')}
+					</p>
+				{/if}
+			{/if}
+
+			{#if chError}
+				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+					<span>{chError}</span>
+				</div>
+			{/if}
 		</section>
 	{/if}
 

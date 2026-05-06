@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
+	"github.com/knot-os/knot-os/core/internal/wol"
 )
 
 // macParam pulls {mac} from the URL and percent-decodes it. chi does
@@ -47,6 +48,7 @@ func (s *Server) MountDevices(r chi.Router) {
 	r.Get("/devices/{mac}", s.handleGetDevice)
 	r.Patch("/devices/{mac}", s.handlePatchDevice)
 	r.Delete("/devices/{mac}", s.handleDeleteDevice)
+	r.Post("/devices/{mac}/wake", s.handleWakeDevice)
 }
 
 // SetDeviceRegistry attaches a registry to the server. Called from main.
@@ -191,6 +193,48 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 	// MAC could linger in nftables until the next 30s tick.
 	s.kick()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleWakeDevice sends a Wake-on-LAN magic packet for the named
+// MAC. Useful for waking an Ethernet-attached desktop / NAS that's
+// in S5/sleep — one click in the UI replaces the "rummage in
+// router web admin for a hidden setting" dance most consumer
+// routers force.
+//
+// The kernel-level UDP send completes silently; we don't retry,
+// don't follow up with an ARP probe — the UI's regular device
+// poll will flip the device back to online once it boots.
+func (s *Server) handleWakeDevice(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	d, ok := s.devices.Get(mac)
+	if !ok {
+		writeError(w, http.StatusNotFound, "device_not_found", "no such device")
+		return
+	}
+	cfg := s.Snapshot()
+	lanCIDR := ""
+	if cfg.Network.LAN != nil {
+		lanCIDR = cfg.Network.LAN.CIDR
+	}
+	if lanCIDR == "" {
+		writeError(w, http.StatusServiceUnavailable, "no_lan",
+			"LAN not configured — can't compute broadcast address")
+		return
+	}
+	bcast, err := wol.BroadcastForCIDR(lanCIDR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "broadcast_failed", err.Error())
+		return
+	}
+	if err := wol.Wake(d.MAC, bcast, 0); err != nil {
+		writeError(w, http.StatusInternalServerError, "wake_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":        true,
+		"mac":       d.MAC,
+		"broadcast": bcast,
+	})
 }
 
 // errDeviceNotFound is reserved for future typed-error paths from the

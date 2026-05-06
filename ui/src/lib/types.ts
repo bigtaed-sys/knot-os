@@ -195,6 +195,20 @@ export interface RescueRevealed {
 	warning: string;
 }
 
+export interface ChannelLoad {
+	channel: number;
+	networks: number;
+	score: number;
+	recommended?: boolean;
+}
+
+export interface ChannelReport {
+	band: '2.4' | string;
+	channels: ChannelLoad[];
+	recommended: number;
+	current_channel?: number;
+}
+
 export interface DNSUpstream {
 	mode: 'udp' | 'doh' | string;
 	upstreams: string[];

@@ -146,6 +146,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountTLS(r)
 		s.MountVPN(r)
 		s.MountGuest(r)
+		s.MountChannels(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
