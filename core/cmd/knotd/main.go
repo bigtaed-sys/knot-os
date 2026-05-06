@@ -19,6 +19,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	knotdns "github.com/knot-os/knot-os/core/internal/dns"
+	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
@@ -29,7 +30,9 @@ import (
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/guest"
+	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/vpn"
+	"github.com/knot-os/knot-os/core/internal/wol"
 )
 
 // schedulerDevices adapts deviceregistry.Registry to the scheduler's
@@ -65,6 +68,15 @@ func (nopMACSetUpdater) UpdateBlockedMACs(_ []string) error { return nil }
 // guestProviderAdapter wraps guest.Registry to satisfy
 // netlinux.GuestSessionProvider. Single-method indirection keeps
 // the linux backend independent of the guest package's import.
+// sealerAdapter promotes a config.Sealer (which is what main.go
+// wires up at boot) into a notify.Sealer. Same two-method
+// contract; the indirection keeps the notify package free of
+// the config import.
+type sealerAdapter struct{ s config.Sealer }
+
+func (a sealerAdapter) Wrap(p string) (string, error)   { return a.s.Wrap(p) }
+func (a sealerAdapter) Unwrap(p string) (string, error) { return a.s.Unwrap(p) }
+
 type guestProviderAdapter struct{ r *guest.Registry }
 
 func (a guestProviderAdapter) CurrentGuestSession() netlinux.ActiveGuestSession {
@@ -580,6 +592,238 @@ func main() {
 					if guestRegistry.SweepExpired(now) {
 						logger.Printf("guest: session expired, tearing down BSS")
 						apiSrv.FireConfigApplied()
+					}
+				}
+			}
+		}()
+	}
+
+	// Event bus: in-process pub/sub for "WAN went down", "new
+	// device on the LAN", etc. Subscribers live in the notify
+	// package; publishers are scattered across the daemon.
+	eventBus := events.NewBus()
+
+	// Notification subsystem: Telegram bot + persistent state.
+	// In dev mode the store still loads but we don't pass a sealer
+	// (matches the rest of the dev-mode plaintext pattern).
+	var notifyStoreSealer notify.Sealer
+	if sealer != nil {
+		notifyStoreSealer = sealerAdapter{s: sealer}
+	}
+	notifyStore, err := notify.Open("/etc/knot/notify.yaml", notifyStoreSealer)
+	if err != nil {
+		logger.Printf("notify: open store: %v (bot disabled)", err)
+	} else {
+		bot := notify.NewBot(notifyStore, eventBus, logger)
+		// Read-only callbacks the bot pulls live data through.
+		// Each closure captures the relevant registry; nil-safety
+		// is one nil-check per callback so they fail soft if a
+		// subsystem isn't wired (dev mode etc.).
+		bot.StatusFn = func() notify.StatusSnapshot {
+			snap := apiSrv.Snapshot()
+			netStatus, _ := backend.Status(ctx)
+			online := 0
+			for _, d := range devices.List() {
+				if d.Online(time.Now()) {
+					online++
+				}
+			}
+			out := notify.StatusSnapshot{
+				Role:          string(snap.Role),
+				DeviceName:    snap.Device.Name,
+				Version:       Version,
+				OnlineDevices: online,
+			}
+			if netStatus.WAN != nil {
+				out.WANUp = netStatus.WAN.Up
+				out.WANIface = netStatus.WAN.Interface
+				out.WANIP = netStatus.WAN.IP
+			}
+			if netStatus.AP != nil {
+				out.APSSID = netStatus.AP.SSID
+				out.APUp = netStatus.AP.Up
+			}
+			return out
+		}
+		bot.DevicesFn = func() []notify.DeviceSnapshot {
+			now := time.Now()
+			all := devices.List()
+			out := make([]notify.DeviceSnapshot, 0, len(all))
+			for _, d := range all {
+				out = append(out, notify.DeviceSnapshot{
+					MAC: d.MAC, Label: d.Label(), IP: d.IP,
+					Online:    d.Online(now),
+					Stale:     d.Stale(now),
+					ProfileID: d.ProfileID,
+				})
+			}
+			return out
+		}
+		bot.ProfilesFn = func() []notify.ProfileSnapshot {
+			ps := profiles.List()
+			out := make([]notify.ProfileSnapshot, 0, len(ps))
+			for _, p := range ps {
+				out = append(out, notify.ProfileSnapshot{ID: p.ID, Name: p.Name})
+			}
+			return out
+		}
+		bot.WakeFn = func(mac string) error {
+			d, ok := devices.Get(mac)
+			if !ok {
+				return fmt.Errorf("device %s not in registry", mac)
+			}
+			cfg := apiSrv.Snapshot()
+			if cfg.Network.LAN == nil {
+				return fmt.Errorf("LAN not configured")
+			}
+			bcast, err := wol.BroadcastForCIDR(cfg.Network.LAN.CIDR)
+			if err != nil {
+				return err
+			}
+			return wol.Wake(d.MAC, bcast, 0)
+		}
+		bot.SetProfileFn = func(mac, profileID string) error {
+			_, err := devices.Update(mac, func(d *deviceregistry.Device) {
+				d.ProfileID = profileID
+			})
+			if err == nil {
+				_ = devices.FlushIfDirty()
+				go sched.RunOnce()
+			}
+			return err
+		}
+		bot.ProtectionFn = func() notify.ProtectionSnapshot {
+			st := dnsLog.Stats(0)
+			cfg := apiSrv.Snapshot()
+			mode := "udp"
+			if cfg.Network.DNS != nil && cfg.Network.DNS.Mode != "" {
+				mode = cfg.Network.DNS.Mode
+			}
+			ratio := 0.0
+			if st.TotalQueries > 0 {
+				ratio = float64(st.TotalBlocked) / float64(st.TotalQueries)
+			}
+			return notify.ProtectionSnapshot{
+				Queries:      st.TotalQueries,
+				Blocked:      st.TotalBlocked,
+				BlockedRatio: ratio,
+				UpstreamMode: mode,
+			}
+		}
+		bot.SetDNSModeFn = func(mode string) error {
+			cfg := apiSrv.Snapshot()
+			if cfg.Network.DNS == nil {
+				cfg.Network.DNS = &config.DNSUpstream{}
+			} else {
+				cp := *cfg.Network.DNS
+				cfg.Network.DNS = &cp
+			}
+			cfg.Network.DNS.Mode = mode
+			cfg.Network.DNS.Upstreams = nil
+			if err := config.SaveWith(*configPath, cfg, sealer); err != nil {
+				return err
+			}
+			apiSrv.SetConfig(cfg)
+			apiSrv.FireConfigApplied()
+			return nil
+		}
+		if guestRegistry != nil {
+			bot.GuestFn = func() *notify.GuestSnapshot {
+				cur := guestRegistry.Current()
+				if !cur.Active(time.Now()) {
+					return nil
+				}
+				rem := int64(-1)
+				if !cur.ExpiresAt.IsZero() {
+					rem = int64(time.Until(cur.ExpiresAt).Seconds())
+					if rem < 0 {
+						rem = 0
+					}
+				}
+				return &notify.GuestSnapshot{
+					SSID: cur.SSID, PSK: cur.PSK, RemainingSec: rem,
+				}
+			}
+			bot.RevokeGuestFn = func() error {
+				err := guestRegistry.Revoke()
+				if err == nil {
+					apiSrv.FireConfigApplied()
+				}
+				return err
+			}
+		}
+
+		apiSrv.SetNotifyServices(notifyStore, bot)
+		if err := bot.Start(ctx); err != nil {
+			logger.Printf("notify: bot start: %v (bot disabled, fix the token in System → Notifications)", err)
+		}
+
+		// WAN watcher: poll backend.Status every 30s and publish a
+		// transition event whenever the up/down flag flips. Cheap;
+		// the actual link-state read is just /sys/class/net/<wan>/operstate.
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			lastUp := false
+			started := false
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					st, err := backend.Status(ctx)
+					if err != nil || st.WAN == nil {
+						continue
+					}
+					if !started {
+						lastUp = st.WAN.Up
+						started = true
+						continue
+					}
+					if st.WAN.Up != lastUp {
+						eventBus.Publish(ctx, events.Event{
+							Kind: events.KindWANStatus,
+							Payload: events.WANStatus{
+								Up:        st.WAN.Up,
+								Interface: st.WAN.Interface,
+								IP:        st.WAN.IP,
+							},
+						})
+						lastUp = st.WAN.Up
+					}
+				}
+			}
+		}()
+
+		// Device-joined watcher: track which MACs the registry has
+		// seen, fire on first appearance. We poll the registry every
+		// 30s rather than wiring callbacks into deviceregistry directly
+		// to keep that package independent of events/.
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			seen := make(map[string]bool)
+			// Bootstrap with whatever already exists so a daemon
+			// restart doesn't spam "new device" for everything.
+			for _, d := range devices.List() {
+				seen[d.MAC] = true
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					for _, d := range devices.List() {
+						if seen[d.MAC] {
+							continue
+						}
+						seen[d.MAC] = true
+						eventBus.Publish(ctx, events.Event{
+							Kind: events.KindDeviceJoined,
+							Payload: events.DeviceJoined{
+								MAC: d.MAC, Hostname: d.Hostname, IP: d.IP,
+							},
+						})
 					}
 				}
 			}

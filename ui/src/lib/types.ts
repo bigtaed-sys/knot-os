@@ -195,6 +195,32 @@ export interface RescueRevealed {
 	warning: string;
 }
 
+export interface NotifyLinkedChat {
+	chat_id: number;
+	username?: string;
+	first_name?: string;
+	last_name?: string;
+	lang: 'ru' | 'en' | string;
+	linked_at: string;
+}
+
+export interface NotifyState {
+	bot_configured: boolean;
+	bot_username?: string;
+	primary_lang: 'ru' | 'en' | string;
+	chats: NotifyLinkedChat[];
+}
+
+export interface NotifyPIN {
+	pin: string;
+	expires_at: string;
+}
+
+export interface NotifyPINStatus {
+	active: boolean;
+	expires_at?: string;
+}
+
 export interface ChannelLoad {
 	channel: number;
 	networks: number;

@@ -28,6 +28,7 @@ import (
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/guest"
+	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 )
 
@@ -53,6 +54,8 @@ type Server struct {
 	rescue          *update.Rescue
 	vpn             *vpn.Registry
 	guest           *guest.Registry
+	notify          *notify.Store
+	notifyBot       *notify.Bot
 	kickScheduler   func()
 	onConfigApplied func(config.Config)
 	production      bool
@@ -147,6 +150,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountVPN(r)
 		s.MountGuest(r)
 		s.MountChannels(r)
+		s.MountNotify(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

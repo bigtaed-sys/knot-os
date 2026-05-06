@@ -2,14 +2,16 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, apiPost, ApiError, ApiTimeoutError, API_BASE } from '$lib/api';
+	import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ApiError, ApiTimeoutError, API_BASE } from '$lib/api';
 	import type {
 		SystemStatus,
 		TLSInfo,
 		UpdateCheckResult,
 		RescueInfo,
 		RescueRevealed,
-		ChannelReport
+		ChannelReport,
+		NotifyState,
+		NotifyPIN
 	} from '$lib/types';
 
 	let status = $state<SystemStatus | null>(null);
@@ -26,6 +28,105 @@
 	let updChecking = $state(false);
 	let updApplying = $state(false);
 	let updError = $state<string | null>(null);
+
+	// Notifications / Telegram bot state.
+	let notifyState = $state<NotifyState | null>(null);
+	let notifyTokenInput = $state('');
+	let notifySaving = $state(false);
+	let notifyError = $state<string | null>(null);
+	let notifyPIN = $state<NotifyPIN | null>(null);
+	let notifyPinTick = $state(0);
+
+	async function loadNotify() {
+		try {
+			notifyState = await apiGet<NotifyState>('/notify/telegram', { timeoutMs: 3000 });
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 503) {
+				notifyState = null;
+			}
+		}
+	}
+
+	async function saveNotifyToken() {
+		if (!notifyTokenInput.trim()) return;
+		notifySaving = true;
+		notifyError = null;
+		try {
+			notifyState = await apiPut<NotifyState>('/notify/telegram/token', {
+				token: notifyTokenInput.trim()
+			});
+			notifyTokenInput = '';
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				notifyError = body?.error?.message ?? e.message;
+			} else if (e instanceof Error) {
+				notifyError = e.message;
+			}
+		} finally {
+			notifySaving = false;
+		}
+	}
+
+	async function issuePIN() {
+		notifyError = null;
+		try {
+			notifyPIN = await apiPost<NotifyPIN>('/notify/telegram/pin');
+		} catch (e) {
+			notifyError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function unlinkChat(chatID: number) {
+		if (!confirm($_('notify.unlink_confirm'))) return;
+		try {
+			await apiDelete(`/notify/telegram/chats/${chatID}`);
+			await loadNotify();
+		} catch (e) {
+			notifyError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function setPrimaryLang(lang: 'ru' | 'en') {
+		try {
+			notifyState = await apiPatch<NotifyState>('/notify/telegram/primary-lang', { lang });
+		} catch (e) {
+			notifyError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	const pinRemaining = $derived.by(() => {
+		if (!notifyPIN) return 0;
+		void notifyPinTick; // re-evaluate every tick
+		const ms = new Date(notifyPIN.expires_at).getTime() - Date.now();
+		return Math.max(0, Math.floor(ms / 1000));
+	});
+
+	// 1-second tick for PIN countdown + linked-chats poll while a PIN
+	// is in flight (so the UI flips the moment the user enters it).
+	let pinPollTimer: ReturnType<typeof setInterval> | null = null;
+	$effect(() => {
+		if (notifyPIN && pinRemaining > 0) {
+			if (pinPollTimer) return;
+			pinPollTimer = setInterval(async () => {
+				notifyPinTick++;
+				if (notifyState) {
+					const before = notifyState.chats.length;
+					await loadNotify();
+					if (notifyState && notifyState.chats.length > before) {
+						notifyPIN = null;
+						if (pinPollTimer) {
+							clearInterval(pinPollTimer);
+							pinPollTimer = null;
+						}
+					}
+				}
+			}, 2000);
+		} else if (pinPollTimer) {
+			clearInterval(pinPollTimer);
+			pinPollTimer = null;
+		}
+	});
 
 	// Channel scanner state.
 	let chReport = $state<ChannelReport | null>(null);
@@ -109,6 +210,7 @@
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 503) rescueAvailable = false;
 		}
+		await loadNotify();
 	}
 
 	async function revealRescue() {
@@ -429,6 +531,142 @@
 				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
 					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
 					<span>{chError}</span>
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	<!-- Notifications / Telegram bot -->
+	{#if notifyState}
+		<section class="surface p-5">
+			<h2 class="font-semibold mb-1 flex items-center gap-2">
+				<i class="bi bi-send text-brand-500"></i>
+				{$_('notify.section')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">{$_('notify.subtitle')}</p>
+
+			{#if !notifyState.bot_configured}
+				<!-- First-time configuration: paste a bot token. -->
+				<div class="space-y-3">
+					<p class="text-sm">
+						{$_('notify.step1_title')}
+					</p>
+					<ol class="text-xs text-zinc-500 dark:text-zinc-400 space-y-1 list-decimal pl-5">
+						<li>{$_('notify.step1_botfather')}</li>
+						<li>{$_('notify.step1_paste')}</li>
+					</ol>
+					<input
+						class="input font-mono text-xs"
+						type="password"
+						placeholder="1234567890:ABC..."
+						bind:value={notifyTokenInput}
+						disabled={notifySaving}
+					/>
+					<div class="flex flex-wrap gap-2">
+						<button
+							class="btn-primary"
+							disabled={notifySaving || !notifyTokenInput.trim()}
+							onclick={saveNotifyToken}
+						>
+							{#if notifySaving}
+								<span class="spinner"></span>
+							{:else}
+								<i class="bi bi-check2"></i>
+							{/if}
+							{$_('notify.save_token')}
+						</button>
+					</div>
+				</div>
+			{:else}
+				<!-- Configured: show status, link button, chat list. -->
+				<dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm mb-4">
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('notify.bot')}</dt>
+					<dd class="font-mono">
+						{#if notifyState.bot_username}
+							<a
+								class="text-brand-600 dark:text-brand-400 hover:underline"
+								href={`https://t.me/${notifyState.bot_username}`}
+								target="_blank"
+								rel="noreferrer"
+							>
+								@{notifyState.bot_username}
+							</a>
+						{:else}
+							{$_('notify.bot_starting')}
+						{/if}
+					</dd>
+					<dt class="text-zinc-500 dark:text-zinc-400">{$_('notify.primary_lang')}</dt>
+					<dd>
+						<button
+							type="button"
+							class="text-xs px-2 py-0.5 rounded {notifyState.primary_lang === 'ru' ? 'bg-brand-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}"
+							onclick={() => setPrimaryLang('ru')}
+						>
+							🇷🇺 RU
+						</button>
+						<button
+							type="button"
+							class="text-xs px-2 py-0.5 rounded ml-1 {notifyState.primary_lang === 'en' ? 'bg-brand-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}"
+							onclick={() => setPrimaryLang('en')}
+						>
+							🇬🇧 EN
+						</button>
+					</dd>
+				</dl>
+
+				{#if notifyPIN && pinRemaining > 0}
+					<div class="surface-muted p-4 mb-4">
+						<div class="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-1">
+							{$_('notify.pin_title')}
+						</div>
+						<div class="text-3xl font-mono font-bold tabular-nums">{notifyPIN.pin}</div>
+						<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
+							{$_('notify.pin_help', { values: { sec: pinRemaining } })}
+						</p>
+					</div>
+				{/if}
+
+				<button class="btn-ghost mb-4" onclick={issuePIN}>
+					<i class="bi bi-link-45deg"></i>
+					{$_('notify.link_button')}
+				</button>
+
+				<h3 class="font-semibold text-sm mb-2">
+					{$_('notify.linked_chats')}
+					<span class="text-zinc-400">({notifyState.chats.length})</span>
+				</h3>
+				{#if notifyState.chats.length === 0}
+					<p class="text-xs text-zinc-500 dark:text-zinc-400">{$_('notify.no_chats')}</p>
+				{:else}
+					<ul class="surface-muted divide-y divide-zinc-200 dark:divide-zinc-700/50">
+						{#each notifyState.chats as c (c.chat_id)}
+							<li class="flex items-center gap-3 px-3 py-2 text-sm">
+								<i class="bi bi-person-circle text-zinc-400 text-lg"></i>
+								<div class="flex-1 min-w-0">
+									<div class="font-medium truncate">
+										{c.username ? '@' + c.username : c.first_name || c.chat_id}
+									</div>
+									<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+										{c.chat_id} · {c.lang}
+									</div>
+								</div>
+								<button
+									class="text-zinc-400 hover:text-rose-500"
+									title={$_('notify.unlink')}
+									onclick={() => unlinkChat(c.chat_id)}
+								>
+									<i class="bi bi-x-circle"></i>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			{/if}
+
+			{#if notifyError}
+				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+					<span>{notifyError}</span>
 				</div>
 			{/if}
 		</section>

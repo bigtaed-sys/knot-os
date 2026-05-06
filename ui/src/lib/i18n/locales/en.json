@@ -419,6 +419,24 @@
 		"isolation_help": "Guests can't see your main LAN devices — internet only. Separate subnet, separate DHCP scope, drop on forwarding between guest and LAN.",
 		"disabled": "Guest network requires Wi-Fi router mode on Pi 4/5 with USB Ethernet, or a Zero 2W with a multi-BSS-capable Wi-Fi driver."
 	},
+	"notify": {
+		"section": "Notifications (Telegram bot)",
+		"subtitle": "The bot pushes alerts on important events and accepts commands with inline keyboards — control your router right from Telegram.",
+		"step1_title": "Bot setup, step 1 — token",
+		"step1_botfather": "Create a bot: message @BotFather → /newbot → name → @username. You'll get a token like 1234567890:ABC...",
+		"step1_paste": "Paste the token below and save. knotd verifies it via getMe and starts the bot loop.",
+		"save_token": "Save token",
+		"bot": "Bot",
+		"bot_starting": "starting…",
+		"primary_lang": "Default language",
+		"pin_title": "One-time PIN",
+		"pin_help": "Open the bot, press /start, send this code. Expires in {sec}s.",
+		"link_button": "Link another chat",
+		"linked_chats": "Linked chats",
+		"no_chats": "No chats linked yet.",
+		"unlink": "Unlink",
+		"unlink_confirm": "Unlink this chat? The bot will stop accepting commands and stop sending notifications there."
+	},
 	"channels": {
 		"section": "2.4 GHz channel scanner",
 		"subtitle": "Scan the airwaves and recommend which of channels 1/6/11 is least crowded by neighbouring APs. Wi-Fi router mode only — extender mode pins the channel to the upstream.",
