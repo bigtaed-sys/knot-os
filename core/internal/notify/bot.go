@@ -34,6 +34,7 @@ type Bot struct {
 	SetDNSModeFn func(mode string) error
 	GuestFn      func() *GuestSnapshot
 	RevokeGuestFn func() error
+	RoutingFn    func() *RoutingSnapshot
 
 	mu       sync.Mutex
 	running  bool
@@ -85,6 +86,25 @@ type GuestSnapshot struct {
 	SSID         string
 	PSK          string
 	RemainingSec int64 // -1 means "until revoked"
+}
+
+// RoutingSnapshot is what /routing renders. Keeps the bot decoupled
+// from the routing package — main.go assembles this from the routing
+// result + subscription registry.
+type RoutingSnapshot struct {
+	// Subscriptions configured (URL-backed + manual). The "manual"
+	// pseudo-sub counts as 1 here unless empty.
+	Subscriptions int
+	// Servers across all subs.
+	Servers int
+	// DevicesTunnel / DevicesDirect / DevicesKill — bucket counts
+	// for the per-device routing decisions.
+	DevicesTunnel int
+	DevicesDirect int
+	DevicesKill   int
+	// MissingOutbounds is the same list the UI shows when a profile
+	// points at a vanished server. Empty == healthy state.
+	MissingOutbounds []string
 }
 
 // NewBot builds a Bot with no callbacks wired (caller assigns the
@@ -261,6 +281,10 @@ func (b *Bot) handleMessage(ctx context.Context, m *Message) {
 		b.sendProtection(ctx, chatID, lang)
 	case text == "/guest":
 		b.sendGuest(ctx, chatID, lang)
+	case text == "/routing":
+		b.sendRouting(ctx, chatID, lang)
+	case text == "/tips":
+		b.send(ctx, chatID, b.tr.T(lang, "tips"), nil)
 	case text == "/lang":
 		b.send(ctx, chatID, b.tr.T(lang, "choose_lang"), &InlineKeyboard{
 			{
@@ -601,6 +625,31 @@ func (b *Bot) renderGuest(lang string) (string, *InlineKeyboard) {
 		{{Text: b.tr.T(lang, "button_guest_revoke"), CallbackData: "guest:revoke"}},
 	}
 	return b.tr.T(lang, "guest_title") + "\n\n" + body, &kb
+}
+
+func (b *Bot) sendRouting(ctx context.Context, chatID int64, lang string) {
+	text, _ := b.renderRouting(lang)
+	b.send(ctx, chatID, text, nil)
+}
+
+func (b *Bot) renderRouting(lang string) (string, *InlineKeyboard) {
+	if b.RoutingFn == nil {
+		return b.tr.T(lang, "routing_title") + "\n\n" + b.tr.T(lang, "routing_empty"), nil
+	}
+	r := b.RoutingFn()
+	if r == nil || r.Subscriptions == 0 && r.Servers == 0 {
+		return b.tr.T(lang, "routing_title") + "\n\n" + b.tr.T(lang, "routing_empty"), nil
+	}
+	parts := []string{
+		b.tr.T(lang, "routing_title"),
+		"",
+		b.tr.T(lang, "routing_subs", r.Subscriptions, r.Servers),
+		b.tr.T(lang, "routing_buckets", r.DevicesTunnel, r.DevicesDirect, r.DevicesKill),
+	}
+	if len(r.MissingOutbounds) > 0 {
+		parts = append(parts, "", b.tr.T(lang, "routing_missing", len(r.MissingOutbounds)))
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 // --- event-bus subscriber: push notifications -----------------------------

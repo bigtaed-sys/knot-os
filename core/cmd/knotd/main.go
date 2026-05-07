@@ -790,6 +790,44 @@ func main() {
 			}
 		}
 
+		// VPN-routing summary for /routing in Telegram. Mirrors the
+		// /api/routing endpoint but bucketed for chat display.
+		bot.RoutingFn = func() *notify.RoutingSnapshot {
+			cfg := apiSrv.Snapshot()
+			lan := ""
+			if cfg.Network.LAN != nil {
+				lan = cfg.Network.LAN.CIDR
+			}
+			if lan == "" {
+				return nil
+			}
+			res, err := routing.FromRegistries(subsRegistry, devices, profiles, lan)
+			if err != nil {
+				return nil
+			}
+			snap := &notify.RoutingSnapshot{
+				MissingOutbounds: res.MissingOutbounds,
+			}
+			subList := subsRegistry.List()
+			for _, s := range subList {
+				if len(s.Servers) > 0 {
+					snap.Subscriptions++
+					snap.Servers += len(s.Servers)
+				}
+			}
+			for _, dr := range res.DeviceRoutes {
+				switch dr.Status {
+				case "tunnel":
+					snap.DevicesTunnel++
+				case "kill":
+					snap.DevicesKill++
+				default:
+					snap.DevicesDirect++
+				}
+			}
+			return snap
+		}
+
 		apiSrv.SetNotifyServices(notifyStore, bot)
 		if err := bot.Start(ctx); err != nil {
 			logger.Printf("notify: bot start: %v (bot disabled, fix the token in System → Notifications)", err)
