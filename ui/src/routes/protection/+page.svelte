@@ -115,21 +115,44 @@
 
 	async function refresh(initial = false) {
 		if (initial) loading = true;
+		// allSettled so a 503 from /dns/stats doesn't short-circuit
+		// the whole page when one of the four APIs is the only one
+		// failing. That used to lock the spinner on whenever the DNS
+		// service-unavailable racing pattern landed.
 		try {
-			await Promise.all([loadStats(), loadQueries(), loadDevices(), loadUpstream()]);
+			const results = await Promise.allSettled([
+				loadStats(),
+				loadQueries(),
+				loadDevices(),
+				loadUpstream()
+			]);
 			error = null;
-		} catch (e) {
-			if (e instanceof ApiError && e.status === 401) {
-				goto('/login', { replaceState: true });
-				return;
+			// Special-case auth + disabled before falling through to
+			// the generic error path. First match wins.
+			for (const r of results) {
+				if (r.status !== 'rejected') continue;
+				const e = r.reason;
+				if (e instanceof ApiError && e.status === 401) {
+					goto('/login', { replaceState: true });
+					return;
+				}
+				if (e instanceof ApiError && e.status === 503) {
+					error = 'disabled';
+					return;
+				}
 			}
-			if (e instanceof ApiError && e.status === 503) {
-				error = 'disabled';
-				return;
+			for (const r of results) {
+				if (r.status !== 'rejected') continue;
+				const e = r.reason;
+				error = e instanceof Error ? e.message : String(e);
+				break;
 			}
-			error = e instanceof Error ? e.message : String(e);
 		} finally {
-			if (initial) loading = false;
+			// Always release the spinner. Earlier `if (initial)` gate
+			// left a window where an early `return` from catch could
+			// fail to flip it on path edges (e.g. goto rejecting
+			// async). Unconditional flip is cheap and defensive.
+			loading = false;
 		}
 	}
 
