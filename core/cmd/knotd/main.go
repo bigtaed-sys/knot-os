@@ -31,6 +31,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/notify"
+	"github.com/knot-os/knot-os/core/internal/subscription"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 	"github.com/knot-os/knot-os/core/internal/wol"
 )
@@ -562,6 +563,19 @@ func main() {
 		snap := wgRegistry.Server()
 		logger.Printf("vpn: server pub=%s peers=%d enabled=%v",
 			wgRegistry.PublicServerKey().String()[:11]+"…", len(wgRegistry.Peers()), snap.Enabled)
+	}
+
+	// VPN-subscription registry — Happ-style v0.5 feature. Stores
+	// pasted vless://-style URIs and HTTPS subscription URLs that
+	// resolve into bundles of servers. The fetcher runs HTTPS GETs
+	// when the user clicks "Refresh"; the registry caches the
+	// parsed snapshot to disk so we survive a reboot offline.
+	subsRegistry := subscription.NewRegistry("/var/lib/knot/subscriptions.yaml")
+	if err := subsRegistry.Load(); err != nil {
+		logger.Printf("subscription: load: %v (starting empty)", err)
+	} else {
+		apiSrv.SetSubscriptions(subsRegistry, subscription.NewFetcher())
+		logger.Printf("subscription: loaded %d subscriptions", len(subsRegistry.List()))
 	}
 
 	// Guest network registry. Single active session at a time,
