@@ -41,6 +41,7 @@ DEPLOY_DIR="$ROOT/image/deploy"
 STAGE_DIR="$ROOT/image/stage-knot"
 FILES_DIR="$STAGE_DIR/00-install-knotd/files"
 PLUGINS_FILES_DIR="$STAGE_DIR/01-install-plugins/files"
+SINGBOX_FILES_DIR="$STAGE_DIR/03-singbox/files"
 
 # ---- Pre-flight ------------------------------------------------------------
 
@@ -103,6 +104,75 @@ for p in "$ROOT/plugins"/*/; do
     fi
 done
 shopt -u nullglob
+
+# ---- 3b. Fetch + verify sing-box binary -----------------------------------
+#
+# Version is pinned in core/internal/singbox/singbox.go (const Version)
+# to keep the source-of-truth in one place. We resolve it here via a
+# tiny `go run` so the shell script doesn't need a regex parse of Go.
+# The binary lands in stage-knot/03-singbox/files/sing-box; the substage
+# script then `install`s it into the rootfs.
+
+echo "==> [3b/7] Staging sing-box binary"
+mkdir -p "$SINGBOX_FILES_DIR" "$CACHE_DIR"
+
+SINGBOX_VERSION="$(run_user env GOFLAGS=-mod=mod \
+    go run "$ROOT/core/cmd/print-singbox-version" 2>/dev/null || true)"
+if [[ -z "$SINGBOX_VERSION" ]]; then
+    # Fallback: grep the constant directly. Loose match — if the
+    # printer cmd disappears we still produce a version.
+    SINGBOX_VERSION="$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+[^"]*"' \
+        "$ROOT/core/internal/singbox/singbox.go" | head -1 | \
+        sed -E 's/.*"([^"]+)"/\1/')"
+fi
+if [[ -z "$SINGBOX_VERSION" ]]; then
+    echo "fatal: could not determine sing-box version from singbox.go" >&2
+    exit 1
+fi
+
+# We pin SHA-256 alongside the version. When bumping, update both.
+# Source: https://github.com/SagerNet/sing-box/releases (linux-arm64).
+SINGBOX_TGZ_NAME="sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz"
+SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${SINGBOX_TGZ_NAME}"
+SINGBOX_CACHED="$CACHE_DIR/$SINGBOX_TGZ_NAME"
+SINGBOX_BIN="$SINGBOX_FILES_DIR/sing-box"
+
+# Pinned SHA-256 of the upstream tar.gz. Empty = first-build mode:
+# we record the hash on stdout for the developer to paste back.
+case "$SINGBOX_VERSION" in
+    1.10.7)  SINGBOX_SHA256="" ;;  # TODO: pin once verified manually
+    *)       SINGBOX_SHA256="" ;;
+esac
+
+if [[ ! -f "$SINGBOX_CACHED" ]]; then
+    echo "    downloading $SINGBOX_URL"
+    curl -fL --progress-bar -o "$SINGBOX_CACHED" "$SINGBOX_URL"
+fi
+
+ACTUAL_SHA="$(sha256sum "$SINGBOX_CACHED" | awk '{print $1}')"
+if [[ -n "$SINGBOX_SHA256" ]]; then
+    if [[ "$ACTUAL_SHA" != "$SINGBOX_SHA256" ]]; then
+        echo "fatal: sing-box ${SINGBOX_VERSION} sha256 mismatch" >&2
+        echo "       expected: $SINGBOX_SHA256" >&2
+        echo "       actual:   $ACTUAL_SHA" >&2
+        exit 1
+    fi
+else
+    echo "    note: no pinned sha256 for ${SINGBOX_VERSION}; recording $ACTUAL_SHA"
+fi
+
+# Extract just the binary out of the tarball.
+TMP_EXTRACT="$(mktemp -d)"
+tar -xzf "$SINGBOX_CACHED" -C "$TMP_EXTRACT"
+EXTRACTED_BIN="$(find "$TMP_EXTRACT" -type f -name 'sing-box' -perm -u+x | head -1)"
+if [[ -z "$EXTRACTED_BIN" ]]; then
+    echo "fatal: sing-box binary not found inside $SINGBOX_TGZ_NAME" >&2
+    rm -rf "$TMP_EXTRACT"
+    exit 1
+fi
+install -m 755 "$EXTRACTED_BIN" "$SINGBOX_BIN"
+rm -rf "$TMP_EXTRACT"
+echo "    sing-box: $(stat -c '%s' "$SINGBOX_BIN") bytes (v${SINGBOX_VERSION})"
 
 # ---- 4. Download Pi OS Lite (cached) --------------------------------------
 
@@ -279,6 +349,10 @@ install -m 755 -D "$FILES_DIR/knotctl"             "$MOUNT_DIR/usr/local/bin/kno
 install -m 644 -D "$FILES_DIR/knotd.service"       "$MOUNT_DIR/etc/systemd/system/knotd.service"
 install -m 600 -D "$FILES_DIR/default-config.yaml" "$MOUNT_DIR/etc/knot/config.yaml"
 chmod 700 "$MOUNT_DIR/etc/knot"
+
+# sing-box VPN engine. Started lazily by knotd when a profile with
+# real outbounds is applied; otherwise sits idle on disk.
+install -m 755 -D "$SINGBOX_FILES_DIR/sing-box" "$MOUNT_DIR/usr/local/bin/sing-box"
 
 # Recovery / ops scripts:
 #   knot-bootlog       — writes startup diagnostics to /boot/firmware
