@@ -120,6 +120,19 @@ func Build(in Inputs) (Result, error) {
 	// be able to swallow LAN traffic.
 	cfg.Routes = []singbox.RouteRule{singbox.PreLANBypass(in.LANCIDR)}
 
+	// Enable the TUN inbound whenever we have at least one user
+	// outbound. AutoRoute=true delegates iproute2 + nftables to
+	// sing-box, which is the path the upstream tests against; trying
+	// to mirror those rules in apply_router.go is a recipe for
+	// drift. StrictRoute=true drops any packet that escapes the TUN
+	// — belt-and-braces against accidental DNS leaks.
+	if len(in.Outbounds) > 0 {
+		cfg.TUN = &singbox.TUNInbound{
+			AutoRoute:   true,
+			StrictRoute: true,
+		}
+	}
+
 	deviceRoutes := make(map[string]DeviceRoute, len(devs))
 	missingSet := make(map[string]struct{})
 

@@ -22,7 +22,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${VERSION:-0.1.0-dev}"
+VERSION="${VERSION:-2026.05.1-dev}"
 LITE_URL="${LITE_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
 QEMU_BIN="${QEMU_BIN:-/usr/bin/qemu-aarch64-static}"
 

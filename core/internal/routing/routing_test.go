@@ -182,6 +182,27 @@ func TestBuildDeterministic(t *testing.T) {
 	}
 }
 
+func TestBuildEnablesTUNWhenOutboundsPresent(t *testing.T) {
+	// No user outbounds → TUN stays off (no point bringing up an
+	// interface to route nothing).
+	res, _ := Build(Inputs{LANCIDR: "192.168.42.0/24"})
+	if res.Config.TUN != nil {
+		t.Error("TUN should not be set when there are no user outbounds")
+	}
+
+	// Outbound present → TUN auto-route on.
+	res, _ = Build(Inputs{
+		LANCIDR:   "192.168.42.0/24",
+		Outbounds: []singbox.Outbound{fakeOutbound("p:s")},
+	})
+	if res.Config.TUN == nil {
+		t.Fatal("TUN should be set when at least one user outbound exists")
+	}
+	if !res.Config.TUN.AutoRoute || !res.Config.TUN.StrictRoute {
+		t.Errorf("TUN should default to AutoRoute+StrictRoute, got %+v", res.Config.TUN)
+	}
+}
+
 func TestBuildLANBypassAlwaysFirst(t *testing.T) {
 	res, _ := Build(Inputs{
 		LANCIDR:   "10.0.0.0/24",

@@ -2,7 +2,43 @@
 
 All notable changes to KnotOS are documented here.
 
-The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to semantic versioning.
+The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
+
+## [2026.05.1] — 2026-05-07
+
+Theme: **"Per-device VPN, Happ-style"**. KnotOS gains a real subscription-driven VPN client that any LAN device can be routed through, picked per-profile from the admin UI or Telegram, with kill-switch and DNS-leak prevention by default.
+
+### Versioning change
+
+- Switched to CalVer: `v<year>.<month>.<release>[-<patch>]`. The previous `0.x.y` numbering is retired. Build artifacts now look like `KnotOS-zero2w-2026.05.1.img.xz`.
+
+### Three flagship pieces
+
+- **`sing-box` engine embedded in the image** with the full protocol matrix the Russian-market 2026 ecosystem uses: VLESS + REALITY + Vision flow, VMess (both v2rayN-JSON and URI), Trojan, Shadowsocks (SIP002 + legacy), WireGuard outbound. uTLS fingerprinting (`chrome` / `firefox` / `safari` / `random`). WebSocket / gRPC / HTTP/2 transports. Pinned upstream version, SHA-256 verified at image build, source-of-truth lives in one Go constant. `singbox.Manager` runs the supervisor: idle until the first user outbound appears, SIGHUP reload on changes, full stop when the last server is removed.
+- **Subscription registry + parser**. Paste a provider's HTTPS subscription URL or a single share link (`vless://`, `vmess://`, `trojan://`, `ss://`) and KnotOS reads the bundle, decodes whatever encoding the provider chose (base64, raw text, the v2rayN-shaped JSON-in-base64), and emits ready-to-use outbounds. Stable per-server IDs (sha1 of the URI prefix) so the UI's "selected server" pointer survives a re-fetch even when upstream order shifts. A bad fetch never trampling the previous good snapshot — the registry records the error, keeps the cached server list. Header surfacing for `subscription-userinfo` (the de-facto quota header) and `profile-title`.
+- **Per-device routing + kill-switch + DNS-leak fix**. `Profile.RouteVia` is the one new field — assign a server tag (`<sub-id>:<server-id>`) to a profile, every device in that profile is now tunneled. The render pipeline always prepends a LAN-bypass rule so RFC1918 traffic can never accidentally take a tunnel. A profile pointing at a vanished server (provider removed it on a re-fetch) is auto-routed to `block` instead of silently leaking through `direct` — this is the kill-switch. The `tun` inbound is enabled with `auto_route=true, strict_route=true` whenever any user outbound exists; sing-box itself owns the iproute2 + nftables rules, no mirror in `apply_router.go`. DNS for tunneled sources gets a parallel `dns.rules` entry that pins their resolution through the same outbound — no plaintext UDP/53 leaking to the LAN's dnsmasq.
+
+### "Маршрутизация" UI page
+
+- Top-line warning when any profile points at a vanished server (with the affected outbound tags).
+- Subscription cards: per-card Refresh, "updated 3 min ago", inline server list, last-error in red.
+- Profile → server picker grouped by subscription, includes a "Direct" option.
+- Per-device live status: «Tunnel» / «Direct» / «Kill switch» (red), background re-poll every 15 s.
+- Full ru/en localization with plural-aware strings.
+
+### Telegram bot polish
+
+Every visible string rewritten for warmth — empty states tell you what to do next, notifications carry a follow-up sentence, /help groups commands by section emoji. New `/routing` command shows bucketed counts (subs/servers/devices-by-status/missing) and warns about dead servers; `/tips` is a hidden Easter egg with five tricks new users won't find on their own. Build-time parity tests catch the easy mistake of adding a phrase to one language without the other or using mismatched format verbs.
+
+### Operator-facing additions
+
+- `GET /api/routing` — per-device decisions and `missing_outbounds` for the UI page and the new `/routing` command.
+- `GET/POST/PATCH/DELETE /api/subscriptions[/{id}[/refresh]]` — full CRUD for subscriptions.
+- `POST /api/subscriptions/manual/uris` — paste-a-link entry point.
+
+### Hardware acceptance
+
+See [`docs/v0.5-acceptance.md`](docs/v0.5-acceptance.md) for the full step-by-step. Highlights: confirm `/dev/net/tun` opens, sing-box installs `ip rule` + `nft` entries via auto-route, a tunneled device's exit IP at `ifconfig.me` is the provider's, the kill-switch fires when a server vanishes from a re-fetched subscription, and the dnsleaktest result shows only the provider's resolver.
 
 ## [0.4.0] — 2026-05-05
 

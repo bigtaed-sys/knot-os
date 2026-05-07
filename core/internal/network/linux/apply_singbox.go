@@ -5,6 +5,8 @@ package linux
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 	"syscall"
 
@@ -39,11 +41,19 @@ var _ singbox.Runner = (*SingBoxRunner)(nil)
 
 // Start launches sing-box with the given config path. No-op when
 // already running — Manager calls Reload for that case.
+//
+// Pre-flight: ensure the TUN module is loaded and IP forwarding is
+// on. sing-box's auto_route does the iproute2 / nftables work once
+// the TUN device is open, but it can't pull the kernel module out
+// of nowhere.
 func (r *SingBoxRunner) Start(ctx context.Context, confPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.proc != nil && r.proc.Running() {
 		return nil
+	}
+	if err := ensureTUNAvailable(ctx); err != nil {
+		return fmt.Errorf("sing-box: tun preflight: %w", err)
 	}
 	// `-D /run/knot` keeps any working files (clash UI cache, etc.)
 	// inside the tmpfs runtime dir so they get wiped on reboot.
@@ -58,6 +68,29 @@ func (r *SingBoxRunner) Start(ctx context.Context, confPath string) error {
 		r.proc = nil
 		return fmt.Errorf("sing-box: start: %w", err)
 	}
+	return nil
+}
+
+// ensureTUNAvailable loads the tun kernel module if /dev/net/tun
+// isn't there yet, and turns on IPv4 forwarding (idempotent — Wi-Fi
+// router mode already does this; we re-set it to be defensive on a
+// freshly-boot LAN-router-only host).
+//
+// We tolerate modprobe failures softly: on Pi OS the tun module is
+// always builtin or auto-loaded, but on a custom kernel it might
+// be missing entirely. Sing-box will fail with a clearer error then
+// than a generic "config rejected".
+func ensureTUNAvailable(ctx context.Context) error {
+	if _, err := os.Stat("/dev/net/tun"); err == nil {
+		// Already there — module's loaded or builtin.
+	} else {
+		_ = exec.CommandContext(ctx, "modprobe", "tun").Run()
+	}
+	// Sing-box auto_route sets the iproute2 + nft rules but doesn't
+	// flip net.ipv4.ip_forward; do it explicitly so the LAN→TUN→WAN
+	// path forwards.
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv6.conf.all.forwarding=1").Run()
 	return nil
 }
 

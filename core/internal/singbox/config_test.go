@@ -267,6 +267,99 @@ func TestWebSocketTransportRendersHeaders(t *testing.T) {
 	}
 }
 
+func TestTUNInboundRendersWithDefaults(t *testing.T) {
+	c := Config{
+		TUN: &TUNInbound{AutoRoute: true, StrictRoute: true},
+	}
+	js, err := c.RenderJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"type": "tun"`,
+		`"interface_name": "knotvpn0"`,
+		`"172.19.0.1/30"`,
+		`"auto_route": true`,
+		`"strict_route": true`,
+		`"sniff": true`,
+		`"mtu": 1492`,
+	} {
+		if !strings.Contains(string(js), want) {
+			t.Errorf("missing %q in TUN render:\n%s", want, js)
+		}
+	}
+}
+
+func TestTUNInboundRespectsOverrides(t *testing.T) {
+	c := Config{
+		TUN: &TUNInbound{
+			InterfaceName: "vpnlan",
+			Address:       []string{"10.99.0.1/30"},
+			MTU:           1280,
+		},
+	}
+	js, _ := c.RenderJSON()
+	for _, want := range []string{
+		`"interface_name": "vpnlan"`,
+		`"10.99.0.1/30"`,
+		`"mtu": 1280`,
+		`"auto_route": false`, // not set → false → no kernel writes
+	} {
+		if !strings.Contains(string(js), want) {
+			t.Errorf("missing %q\n%s", want, js)
+		}
+	}
+}
+
+func TestDNSRulesGeneratedForTunneledSources(t *testing.T) {
+	c := Config{
+		TUN: &TUNInbound{AutoRoute: true},
+		Outbounds: []Outbound{
+			{
+				Tag: "tokyo", Type: OutboundVLESS,
+				Server: "h", Port: 443,
+				UUID: "12345678-1234-1234-1234-123456789012",
+			},
+		},
+		Routes: []RouteRule{
+			PreLANBypass("192.168.42.0/24"),
+			{Outbound: "tokyo", SourceIPCIDR: []string{"192.168.42.50/32"}},
+		},
+	}
+	js, err := c.RenderJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"tag": "remote"`) {
+		t.Errorf("remote DNS server tag missing\n%s", js)
+	}
+	if !strings.Contains(string(js), `"server": "remote"`) {
+		t.Errorf("DNS rule routing tunneled-source to remote missing\n%s", js)
+	}
+	if strings.Contains(string(js), `"server": "direct"`) {
+		t.Errorf("DNS rule should not reference direct outbound\n%s", js)
+	}
+}
+
+func TestDNSRulesNotEmittedWithoutTUN(t *testing.T) {
+	c := Config{
+		Outbounds: []Outbound{
+			{
+				Tag: "tokyo", Type: OutboundVLESS,
+				Server: "h", Port: 443,
+				UUID: "12345678-1234-1234-1234-123456789012",
+			},
+		},
+		Routes: []RouteRule{
+			{Outbound: "tokyo", SourceIPCIDR: []string{"192.168.42.50/32"}},
+		},
+	}
+	js, _ := c.RenderJSON()
+	if strings.Contains(string(js), `"tag": "remote"`) {
+		t.Errorf("remote DNS server should not be present without TUN\n%s", js)
+	}
+}
+
 func TestPreLANBypassAlwaysDirect(t *testing.T) {
 	r := PreLANBypass("192.168.42.0/24")
 	if r.Outbound != "direct" {
