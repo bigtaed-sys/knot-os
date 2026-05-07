@@ -25,6 +25,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
+	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/subscription"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
@@ -56,6 +57,7 @@ type Server struct {
 	vpn             *vpn.Registry
 	subs            *subscription.Registry
 	subFetcher      *subscription.Fetcher
+	routingProvider func() (routing.Result, error)
 	guest           *guest.Registry
 	notify          *notify.Store
 	notifyBot       *notify.Bot
@@ -155,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountChannels(r)
 		s.MountNotify(r)
 		s.MountSubscriptions(r)
+		s.MountRouting(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

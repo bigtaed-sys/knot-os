@@ -31,6 +31,8 @@ import (
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/notify"
+	"github.com/knot-os/knot-os/core/internal/routing"
+	"github.com/knot-os/knot-os/core/internal/singbox"
 	"github.com/knot-os/knot-os/core/internal/subscription"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 	"github.com/knot-os/knot-os/core/internal/wol"
@@ -578,6 +580,27 @@ func main() {
 		logger.Printf("subscription: loaded %d subscriptions", len(subsRegistry.List()))
 	}
 
+	// sing-box supervisor. The Linux build registers a real process
+	// runner that signals SIGHUP on config changes; the dev-host
+	// build is a no-op stub. The Manager itself is platform-agnostic.
+	singboxRunner := netlinux.NewSingBoxRunner()
+	singboxMgr := singbox.NewManager(singboxRunner, logger)
+
+	// Routing diagnostics endpoint — UI pulls per-device decisions
+	// and the kill-switch list from this. Closes over the live
+	// registries; reads happen on every GET /api/routing.
+	apiSrv.SetRoutingProvider(func() (routing.Result, error) {
+		cfg := apiSrv.Snapshot()
+		lan := ""
+		if cfg.Network.LAN != nil {
+			lan = cfg.Network.LAN.CIDR
+		}
+		if lan == "" {
+			return routing.Result{}, fmt.Errorf("LAN not configured yet")
+		}
+		return routing.FromRegistries(subsRegistry, devices, profiles, lan)
+	})
+
 	// Guest network registry. Single active session at a time,
 	// auto-expires via a 30s sweeper. Apply callback below maps
 	// the active session into the hostapd multi-BSS config.
@@ -887,6 +910,29 @@ func main() {
 			}); ok {
 				if err := lb.ApplyWireGuard(ctx, wgRegistry.Server(), wgRegistry.Peers()); err != nil {
 					logger.Printf("vpn: apply: %v", err)
+				}
+			}
+		}
+
+		// sing-box subscription routing. Pure render → write →
+		// SIGHUP. Manager skips starting the process when no profile
+		// asks for a tunnel, so a fresh device with no subs has zero
+		// runtime cost.
+		lanCIDR := ""
+		if applied.Network.LAN != nil {
+			lanCIDR = applied.Network.LAN.CIDR
+		}
+		if lanCIDR != "" {
+			res, err := routing.FromRegistries(subsRegistry, devices, profiles, lanCIDR)
+			if err != nil {
+				logger.Printf("routing: build: %v", err)
+			} else {
+				if len(res.MissingOutbounds) > 0 {
+					logger.Printf("routing: %d missing outbounds, kill-switching affected devices: %v",
+						len(res.MissingOutbounds), res.MissingOutbounds)
+				}
+				if err := singboxMgr.Apply(ctx, res.Config); err != nil {
+					logger.Printf("singbox: apply: %v", err)
 				}
 			}
 		}

@@ -37,6 +37,12 @@ type Profile struct {
 	// looks them up against the global blocklist registry. Empty ==
 	// no DNS filtering (pass-through).
 	DNSBlocklists []string `yaml:"dns_blocklists,omitempty" json:"dns_blocklists,omitempty"`
+	// RouteVia, when non-empty, sends all traffic from devices on
+	// this profile through the named outbound. Format mirrors
+	// singbox.Outbound.Tag — usually "<sub-id>:<server-id>" for a
+	// concrete server, or "auto:<sub-id>" for a urltest selector.
+	// Empty == direct (no tunnel). M28+ feature.
+	RouteVia string `yaml:"route_via,omitempty" json:"route_via,omitempty"`
 	// Builtin marks profiles that ship with KnotOS. The API refuses
 	// to delete or rename them; the user can only edit their
 	// schedule and blocklists.

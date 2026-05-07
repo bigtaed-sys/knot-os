@@ -123,6 +123,9 @@ func sameEditable(a, b Profile) bool {
 	if a.Description != b.Description {
 		return false
 	}
+	if a.RouteVia != b.RouteVia {
+		return false
+	}
 	if len(a.BlockWindows) != len(b.BlockWindows) {
 		return false
 	}
