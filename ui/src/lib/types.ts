@@ -111,6 +111,7 @@ export interface Profile {
 	description?: string;
 	block_windows?: BlockWindow[];
 	dns_blocklists?: string[];
+	route_via?: string;
 	builtin: boolean;
 }
 
@@ -282,4 +283,53 @@ export interface VPNAddPeerResponse {
 	client_config: string;
 	private_key: string;
 	qr_png_base64: string;
+}
+
+
+// --- VPN subscriptions (M27/M28/M29) ---------------------------------------
+
+export interface SubscriptionServer {
+	id: string;
+	display_name: string;
+	uri: string;
+	outbound: {
+		tag?: string;
+		type: string;
+		display_name?: string;
+		server?: string;
+		port?: number;
+	};
+}
+
+export interface Subscription {
+	id: string;
+	display_name: string;
+	url?: string;
+	user_agent?: string;
+	servers: SubscriptionServer[];
+	last_fetched?: string;
+	last_error?: string;
+}
+
+export interface SubscriptionsResponse {
+	subscriptions: Subscription[];
+}
+
+export interface SubscriptionRefreshResponse {
+	subscription: Subscription;
+	subscription_userinfo?: string;
+	profile_title?: string;
+	parse_warnings?: string[];
+}
+
+export interface RoutingDevice {
+	mac: string;
+	outbound: string;
+	status: 'direct' | 'tunnel' | 'kill';
+	profile_id: string;
+}
+
+export interface RoutingResponse {
+	devices: RoutingDevice[];
+	missing_outbounds: string[];
 }
