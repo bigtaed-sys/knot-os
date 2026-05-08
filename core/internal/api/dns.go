@@ -71,10 +71,17 @@ type dnsStatsResponse struct {
 
 func (s *Server) handleDNSStats(w http.ResponseWriter, _ *http.Request) {
 	stats := s.dns.log.Stats(10)
+	// Always emit empty slice rather than nil so the UI's
+	// `top_blocked.length` doesn't blow up. Go's encoding/json
+	// turns a nil slice into JSON null; the UI expects [].
+	top := stats.TopBlocked
+	if top == nil {
+		top = []knotdns.TopBlocked{}
+	}
 	resp := dnsStatsResponse{
 		Queries:    stats.TotalQueries,
 		Blocked:    stats.TotalBlocked,
-		TopBlocked: stats.TopBlocked,
+		TopBlocked: top,
 		BufferSize: stats.BufferSize,
 		BufferCap:  stats.BufferCap,
 		Blocklists: s.dns.blocklists.Sizes(),

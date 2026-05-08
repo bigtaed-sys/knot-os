@@ -53,7 +53,12 @@
 	async function load(initial = false) {
 		try {
 			const r = await apiGet<SubscriptionsResponse>('/subscriptions');
-			subs = r.subscriptions;
+			// Defend against `servers: null` from older backends —
+			// every map/each downstream assumes a real array.
+			subs = (r.subscriptions ?? []).map((s) => ({
+				...s,
+				servers: s.servers ?? []
+			}));
 			available = true;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
@@ -163,7 +168,9 @@
 			);
 			// Surface the latest snapshot directly instead of re-loading
 			// the whole world (avoids flicker).
-			subs = subs.map((s) => (s.id === id ? r.subscription : s));
+			subs = subs.map((s) =>
+				s.id === id ? { ...r.subscription, servers: r.subscription.servers ?? [] } : s
+			);
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -315,7 +322,7 @@
 		</div>
 
 		<!-- Subscriptions list -->
-		{#if subs.length === 1 && subs[0].id === 'manual' && subs[0].servers.length === 0}
+		{#if subs.length === 1 && subs[0].id === 'manual' && (subs[0].servers ?? []).length === 0}
 			<div class="surface p-6 text-center">
 				<div
 					class="w-14 h-14 rounded-full bg-brand-100 dark:bg-brand-500/15 mx-auto flex items-center justify-center mb-3"

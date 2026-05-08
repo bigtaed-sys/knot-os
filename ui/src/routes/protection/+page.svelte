@@ -30,7 +30,15 @@
 	let now = $state(new Date());
 
 	async function loadStats() {
-		stats = await apiGet<DNSStats>('/dns/stats');
+		const raw = await apiGet<DNSStats>('/dns/stats');
+		// Backend may emit null for empty arrays / maps. Normalize on
+		// the way in so every downstream `.length` / `[]` access is safe.
+		stats = {
+			...raw,
+			top_blocked: raw.top_blocked ?? [],
+			blocklists: raw.blocklists ?? {},
+			sources: raw.sources ?? {}
+		};
 	}
 	async function loadUpstream() {
 		try {
@@ -300,7 +308,7 @@
 				<i class="bi bi-bar-chart-fill text-brand-500"></i>
 				{$_('protection.top_blocked')}
 			</h2>
-			{#if stats.top_blocked.length === 0}
+			{#if !stats.top_blocked || stats.top_blocked.length === 0}
 				<p class="text-sm text-zinc-500 dark:text-zinc-400">
 					{$_('protection.top_blocked_empty')}
 				</p>

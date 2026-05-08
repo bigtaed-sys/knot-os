@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,34 @@ import (
 func newRegInTempDir(t *testing.T) *Registry {
 	t.Helper()
 	return NewRegistry(filepath.Join(t.TempDir(), "subscriptions.yaml"))
+}
+
+// TestServersAlwaysNonNilJSON guards against the v2026.05.1 regression
+// where Subscription.Servers marshalled as `null` for a freshly-created
+// subscription, breaking the UI's `sub.servers.length` access.
+func TestServersAlwaysNonNilJSON(t *testing.T) {
+	r := newRegInTempDir(t)
+	added, err := r.Add(Subscription{DisplayName: "Foo", URL: "https://example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Marshal what the API hands the UI. Servers must serialize as
+	// `[]`, not `null`.
+	js, err := json.Marshal(added)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"servers":[]`) {
+		t.Errorf("Servers should marshal as [], got: %s", js)
+	}
+
+	// Same for List() output (used by GET /subscriptions).
+	for _, s := range r.List() {
+		js, _ := json.Marshal(s)
+		if strings.Contains(string(js), `"servers":null`) {
+			t.Errorf("List() returned null servers for sub %q: %s", s.ID, js)
+		}
+	}
 }
 
 func TestNewRegistryHasManual(t *testing.T) {

@@ -457,7 +457,12 @@ type storeDoc struct {
 
 func deepCopy(s Subscription) Subscription {
 	cp := s
-	cp.Servers = append([]Server(nil), s.Servers...)
+	// Always materialize a non-nil slice so the JSON renderer emits
+	// `[]` instead of `null`. The UI does sub.servers.length and
+	// expects a real array; null trips a TypeError at the iteration
+	// site (see Routing page).
+	cp.Servers = make([]Server, len(s.Servers))
+	copy(cp.Servers, s.Servers)
 	return cp
 }
 
