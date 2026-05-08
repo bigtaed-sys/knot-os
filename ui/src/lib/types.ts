@@ -3,6 +3,26 @@
 
 export type Role = 'setup' | 'wifi-extender' | 'wifi-router';
 
+// --- Setup wizard capability detection ----------------------------
+
+export interface EthAdapter {
+	name: string;
+	driver: string;
+	link: boolean;
+	usb: boolean;
+	usb_vendor?: string;
+	usb_product?: string;
+	model: string;
+}
+
+export interface CapabilityReport {
+	pi: string;
+	pi_model_string?: string;
+	eth: EthAdapter[];
+	guest_ap_capable: boolean;
+	router_capable: boolean;
+}
+
 export interface UplinkStatus {
 	ssid: string;
 	connected: boolean;
