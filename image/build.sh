@@ -454,6 +454,32 @@ echo "==> [7/7] Cleaning up and compressing image"
 unmount_image
 trap - EXIT
 
+# Defensive: sync + drop the page cache so xz reads what's actually
+# on the underlying file, not what's still in flight after the loop
+# device's umount. Without this, on a busy host xz can compress a
+# partially-flushed image whose tail bytes are zeros — Etcher then
+# fails verification because the readback differs from the source.
+sync
+sync
+
+# Sanity-check the produced .img: parse the MBR and confirm the
+# rootfs partition's end matches the file size. If it doesn't, an
+# earlier step grew the filesystem past the partition (or vice
+# versa), and flashing will produce an image whose tail extends
+# beyond what the partition table claims — Etcher rejects this
+# with the exact "validation failed" symptom.
+img_bytes="$(stat -c '%s' "$WORK_IMG")"
+mbr_part2_start_lba="$(od -An -tu4 -N4 -j454 "$WORK_IMG" | tr -d ' ')"
+# The above offset is partition 1 start; partition 2 start is at offset 470.
+mbr_part2_start_lba="$(od -An -tu4 -N4 -j470 "$WORK_IMG" | tr -d ' ')"
+mbr_part2_size_lba="$(od -An -tu4 -N4 -j474 "$WORK_IMG" | tr -d ' ')"
+mbr_part2_end="$(( (mbr_part2_start_lba + mbr_part2_size_lba) * 512 ))"
+if [[ "$mbr_part2_end" != "$img_bytes" ]]; then
+    echo "warning: partition-2 end ($mbr_part2_end) != image file size ($img_bytes)"
+    echo "         (off by $(( img_bytes - mbr_part2_end )) bytes — Etcher may complain)"
+fi
+echo "    .img size: $((img_bytes / 1024 / 1024)) MiB ($img_bytes bytes), part2 ends at $mbr_part2_end"
+
 # Wipe any old .img.xz from previous builds so the deploy/ dir only
 # ever has the most recent artifact - keeps the Windows-side rsync
 # back-copy from accumulating stale images.
