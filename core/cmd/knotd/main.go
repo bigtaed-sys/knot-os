@@ -31,6 +31,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/notify"
+	"github.com/knot-os/knot-os/core/internal/applycoord"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/singbox"
 	"github.com/knot-os/knot-os/core/internal/subscription"
@@ -491,6 +492,33 @@ func main() {
 	apiSrv.SetProfileRegistry(profiles)
 	apiSrv.SetDNSServices(dnsLog, dnsBlocklists, dnsDownloader)
 	apiSrv.SetSealer(sealer)
+
+	// Transactional Apply coordinator — wraps backend.Apply with a
+	// snapshot + health-check + rollback. PUT /api/config delegates
+	// here. The CommitFn closure persists the new config to disk,
+	// updates the in-memory snapshot, and fires the onConfigApplied
+	// chain (DNS / TLS / WG / sing-box). If commit fails OR the
+	// post-Apply health check times out, the coordinator re-runs
+	// Apply with the snapshot — system returns to last-known-good.
+	applyCoord, err := applycoord.NewCoordinator(applycoord.Options{
+		Backend: backend,
+		Logger:  logger,
+		SnapshotFn: func() config.Config {
+			return apiSrv.Snapshot()
+		},
+		CommitFn: func(c config.Config) error {
+			if err := config.SaveWith(*configPath, c, sealer); err != nil {
+				return err
+			}
+			apiSrv.SetConfig(c)
+			apiSrv.FireConfigApplied()
+			return nil
+		},
+	})
+	if err != nil {
+		logger.Fatalf("apply coordinator: %v", err)
+	}
+	apiSrv.SetApplyCoordinator(applyCoord)
 	if tlsMaterials != nil {
 		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
 			return leafSubjectFor(apiSrv.Snapshot())

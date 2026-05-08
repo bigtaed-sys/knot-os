@@ -24,6 +24,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
+	"github.com/knot-os/knot-os/core/internal/applycoord"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/subscription"
@@ -58,6 +59,7 @@ type Server struct {
 	subs            *subscription.Registry
 	subFetcher      *subscription.Fetcher
 	routingProvider func() (routing.Result, error)
+	applyCoord      *applycoord.Coordinator
 	guest           *guest.Registry
 	notify          *notify.Store
 	notifyBot       *notify.Bot
@@ -158,6 +160,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountNotify(r)
 		s.MountSubscriptions(r)
 		s.MountRouting(r)
+		s.MountApply(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
@@ -263,6 +266,14 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.cfg)
 }
 
+// SetApplyCoordinator wires a transactional apply coordinator into
+// the server. When set, PUT /api/config goes through the coordinator
+// (snapshot + health-check + auto-rollback). When nil, falls back
+// to the legacy direct-Apply path — kept for tests and dev mode.
+func (s *Server) SetApplyCoordinator(c *applycoord.Coordinator) {
+	s.applyCoord = c
+}
+
 func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	var incoming config.Config
 	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
@@ -281,6 +292,43 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_config", err.Error())
 		return
 	}
+
+	// Transactional path: snapshot + Apply + health-check + auto-rollback
+	// on failure. The coordinator's CommitFn is what actually persists +
+	// updates s.cfg + fires onConfigApplied (wired in main.go).
+	if s.applyCoord != nil {
+		att := s.applyCoord.Apply(r.Context(), incoming, "api:put-config")
+		switch att.Status {
+		case applycoord.StatusSucceeded:
+			writeJSON(w, http.StatusOK, map[string]any{
+				"apply_id": att.ID,
+				"config":   incoming,
+			})
+		case applycoord.StatusRolledBack:
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error": map[string]any{
+					"code":     "apply_rolled_back",
+					"message":  "the new config didn't pass health check; rolled back to the previous one",
+					"reason":   att.Error,
+					"apply_id": att.ID,
+				},
+			})
+		default: // Failed
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error": map[string]any{
+					"code":           "apply_failed",
+					"message":        "apply failed and rollback also failed; system may be in an inconsistent state",
+					"reason":         att.Error,
+					"rollback_error": att.RollbackError,
+					"apply_id":       att.ID,
+				},
+			})
+		}
+		return
+	}
+
+	// Legacy direct path — used when a Coordinator wasn't wired (tests,
+	// minimal dev setups). No snapshot, no rollback.
 	if err := s.backend.Apply(r.Context(), incoming); err != nil {
 		writeError(w, http.StatusInternalServerError, "apply_failed", err.Error())
 		return
