@@ -83,9 +83,21 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	//    to be unblocked even though we don't run an STA.
 	b.unblockAndRegulate(ctx, cfg.Device.Country)
 
-	// 1. Free wlan0 from any extender-mode leftovers. wpa_supplicant
-	//    holding wlan0 would block hostapd from claiming it, and a
-	//    leftover ap0 would just be dead weight.
+	// 1. Free wlan0 from any setup/extender leftovers.
+	//
+	// Order matters: hostapd may currently be running on ap0 (setup
+	// mode) or wlan0 (re-apply within router mode). Removing ap0
+	// while hostapd holds it leaves the daemon in an ENODEV zombie
+	// state — the next Restart() then can't cleanly bring it back
+	// on wlan0, the AP never appears, and the user has to re-apply
+	// once more for it to recover. So:
+	//
+	//   1a. Stop hostapd (regardless of which interface it owned).
+	//   1b. Stop any wpa_supplicant.
+	//   1c. Now it's safe to delete ap0 + flush wlan0.
+	if b.hostapd != nil {
+		b.hostapd.Stop()
+	}
 	if b.wpaSupp != nil {
 		b.wpaSupp.Stop()
 		b.wpaSupp = nil

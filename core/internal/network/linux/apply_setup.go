@@ -50,8 +50,14 @@ func (b *LinuxBackend) applySetup(ctx context.Context, cfg config.Config) error 
 	mac, _ := readMAC(IfaceWlan)
 	ssid := SetupSSID(mac)
 
-	// 2. Make sure the radio is not held by an earlier wpa_supplicant
-	//    instance. wlan0 in setup mode has no role.
+	// 2. Free up the radio. If we're transitioning back from
+	//    wifi-router (rare but possible — user re-runs setup), hostapd
+	//    is currently bound to wlan0; we need to stop it before we
+	//    can take wlan0 down without leaving the daemon in ENODEV
+	//    limbo. wpa_supplicant is the same story for extender-mode.
+	if b.hostapd != nil {
+		b.hostapd.Stop()
+	}
 	if b.wpaSupp != nil {
 		b.wpaSupp.Stop()
 		b.wpaSupp = nil

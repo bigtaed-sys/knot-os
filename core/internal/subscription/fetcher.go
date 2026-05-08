@@ -55,11 +55,24 @@ type Fetcher struct {
 	AllowInsecureTLS bool
 }
 
+// MaxRedirects is the cap on subscription-URL redirects we follow.
+// Go's http.Client default is 10; some Russian-market providers
+// (especially those behind Cloudflare WAF / DDoS-Guard / Qrator)
+// redirect through 11–14 hops the first time a UA reaches them.
+// We bump to 20 to absorb that without going pathological.
+const MaxRedirects = 20
+
 // NewFetcher builds a Fetcher with sensible defaults.
 func NewFetcher() *Fetcher {
 	return &Fetcher{
 		Client: &http.Client{
 			Timeout: DefaultFetchTimeout,
+			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+				if len(via) >= MaxRedirects {
+					return fmt.Errorf("stopped after %d redirects", MaxRedirects)
+				}
+				return nil
+			},
 		},
 		UserAgent: DefaultUserAgent,
 	}
@@ -83,7 +96,11 @@ func (f *Fetcher) Fetch(ctx context.Context, sub Subscription) (FetchResult, err
 		// Clone so we don't mutate a shared transport.
 		tr := http.DefaultTransport.(*http.Transport).Clone()
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		client = &http.Client{Timeout: client.Timeout, Transport: tr}
+		client = &http.Client{
+			Timeout:       client.Timeout,
+			Transport:     tr,
+			CheckRedirect: client.CheckRedirect,
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sub.URL, nil)
