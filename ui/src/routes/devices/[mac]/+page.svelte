@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, ApiError, API_BASE } from '$lib/api';
 	import { relativeTime, deviceIcon } from '$lib/format';
-	import type { Device, Profile, ProfilesResponse } from '$lib/types';
+	import type { Device, Profile, ProfilesResponse, BandwidthStats } from '$lib/types';
+	import Sparkline from '$lib/components/Sparkline.svelte';
 
 	// SvelteKit types $page.params as Record<string, string | undefined>;
 	// fall back to '' so encodeURIComponent never sees undefined.
@@ -13,6 +14,8 @@
 
 	let device = $state<Device | null>(null);
 	let profiles = $state<Profile[]>([]);
+	let bandwidth = $state<BandwidthStats | null>(null);
+	let bwTimer: ReturnType<typeof setInterval> | null = null;
 	let loading = $state(true);
 	let notFound = $state(false);
 	let error = $state<string | null>(null);
@@ -52,9 +55,17 @@
 		}
 	}
 
+	async function loadBandwidth() {
+		try {
+			bandwidth = await apiGet<BandwidthStats>(`/bandwidth/${encodeURIComponent(mac)}`);
+		} catch {
+			// non-fatal — fresh device might not have samples yet
+		}
+	}
+
 	async function load() {
 		loading = true;
-		await Promise.all([loadDevice(), loadProfiles()]);
+		await Promise.all([loadDevice(), loadProfiles(), loadBandwidth()]);
 		loading = false;
 	}
 
@@ -152,7 +163,21 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		load();
+		// Refresh bandwidth every 5s for a live graph.
+		bwTimer = setInterval(loadBandwidth, 5000);
+	});
+	onDestroy(() => {
+		if (bwTimer !== null) clearInterval(bwTimer);
+	});
+
+	function fmtBytes(b: number): string {
+		if (b < 1024) return b + ' B';
+		if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+		if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+		return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+	}
 </script>
 
 <a href="/devices" class="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-brand-600 dark:hover:text-brand-400 mb-4">
@@ -213,6 +238,53 @@
 			</div>
 		</div>
 	</section>
+
+	<!-- Bandwidth (M32) — only when we have samples -->
+	{#if bandwidth && bandwidth.sparkline.length > 0}
+		<section class="surface p-5 mb-5">
+			<h2 class="font-semibold mb-4 flex items-center gap-2">
+				<i class="bi bi-graph-up text-brand-500"></i>
+				{$_('devices.bandwidth_title')}
+			</h2>
+			<div class="grid grid-cols-2 gap-4 mb-4 text-sm">
+				<div>
+					<div class="text-xs text-zinc-500 dark:text-zinc-400">{$_('devices.bw_in_now')}</div>
+					<div class="text-xl font-semibold tabular-nums text-brand-600 dark:text-brand-400">
+						{bandwidth.last_sample.kbps_in < 1
+							? '—'
+							: bandwidth.last_sample.kbps_in < 1000
+								? Math.round(bandwidth.last_sample.kbps_in) + ' Kbps'
+								: (bandwidth.last_sample.kbps_in / 1000).toFixed(1) + ' Mbps'}
+					</div>
+				</div>
+				<div>
+					<div class="text-xs text-zinc-500 dark:text-zinc-400">{$_('devices.bw_out_now')}</div>
+					<div class="text-xl font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">
+						{bandwidth.last_sample.kbps_out < 1
+							? '—'
+							: bandwidth.last_sample.kbps_out < 1000
+								? Math.round(bandwidth.last_sample.kbps_out) + ' Kbps'
+								: (bandwidth.last_sample.kbps_out / 1000).toFixed(1) + ' Mbps'}
+					</div>
+				</div>
+			</div>
+			<!-- Bigger sparkline. -->
+			<div class="bg-zinc-50 dark:bg-zinc-900 rounded-lg p-3">
+				<Sparkline values={bandwidth.sparkline} width={520} height={64} />
+			</div>
+			<div class="mt-3 grid grid-cols-2 gap-4 text-xs">
+				<div>
+					<span class="text-zinc-500 dark:text-zinc-400">{$_('devices.bw_total_in')}:</span>
+					<span class="font-semibold tabular-nums">{fmtBytes(bandwidth.cum_in)}</span>
+				</div>
+				<div>
+					<span class="text-zinc-500 dark:text-zinc-400">{$_('devices.bw_total_out')}:</span>
+					<span class="font-semibold tabular-nums">{fmtBytes(bandwidth.cum_out)}</span>
+				</div>
+			</div>
+			<div class="text-xs text-zinc-400 mt-2">{$_('devices.bw_help')}</div>
+		</section>
+	{/if}
 
 	<!-- Identity -->
 	<section class="surface p-5 mb-5">

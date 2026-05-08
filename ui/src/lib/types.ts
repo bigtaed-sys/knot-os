@@ -119,6 +119,26 @@ export interface ProfilesResponse {
 	profiles: Profile[];
 }
 
+// --- Bandwidth (M32) ------------------------------------------------------
+
+export interface Sample {
+	at: string;
+	kbps_in: number;
+	kbps_out: number;
+}
+
+export interface BandwidthStats {
+	mac: string;
+	last_sample: Sample;
+	sparkline: Sample[];
+	cum_in: number;
+	cum_out: number;
+}
+
+export interface BandwidthResponse {
+	devices: BandwidthStats[];
+}
+
 export interface DNSTopBlocked {
 	name: string;
 	count: number;

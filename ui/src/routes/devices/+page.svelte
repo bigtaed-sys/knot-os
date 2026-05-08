@@ -4,9 +4,16 @@
 	import { _ } from 'svelte-i18n';
 	import { apiGet, ApiError } from '$lib/api';
 	import { relativeTime, deviceIcon } from '$lib/format';
-	import type { Device, DevicesResponse } from '$lib/types';
+	import type {
+		Device,
+		DevicesResponse,
+		BandwidthStats,
+		BandwidthResponse
+	} from '$lib/types';
+	import Sparkline from '$lib/components/Sparkline.svelte';
 
 	let devices = $state<Device[]>([]);
+	let bandwidth = $state<Record<string, BandwidthStats>>({});
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let timer: ReturnType<typeof setInterval> | null = null;
@@ -23,6 +30,25 @@
 			});
 			error = null;
 		} catch (e) {
+			// fall through to outer catch
+			throw e;
+		}
+		// Bandwidth is best-effort: never fails the page if it 503s
+		// (older backend without M32) or times out.
+		try {
+			const r = await apiGet<BandwidthResponse>('/bandwidth');
+			const m: Record<string, BandwidthStats> = {};
+			for (const s of r.devices ?? []) m[s.mac] = s;
+			bandwidth = m;
+		} catch {
+			/* non-fatal */
+		}
+	}
+
+	async function refreshOuter(initial = false) {
+		try {
+			await refresh(initial);
+		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
 				goto('/login', { replaceState: true });
 				return;
@@ -34,10 +60,10 @@
 	}
 
 	onMount(() => {
-		refresh(true);
+		refreshOuter(true);
 		timer = setInterval(() => {
 			now = new Date();
-			refresh();
+			refreshOuter();
 		}, 5000);
 	});
 	onDestroy(() => {
@@ -136,6 +162,20 @@
 						{/if}
 					</div>
 				</div>
+
+				<!-- Bandwidth sparkline (M32). Only when we have at least one
+					 sample for this device — quiet on first render, then
+					 fades in as samples arrive. -->
+				{#if bandwidth[d.mac]?.sparkline?.length}
+					<div class="hidden sm:block shrink-0">
+						<Sparkline
+							values={bandwidth[d.mac].sparkline.slice(-60)}
+							width={84}
+							height={24}
+							showLabels
+						/>
+					</div>
+				{/if}
 
 				<i class="bi bi-chevron-right text-zinc-400"></i>
 			</a>
