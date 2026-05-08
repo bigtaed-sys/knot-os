@@ -103,6 +103,26 @@ func (r *Registry) Get(mac string) (Device, bool) {
 	return *d, true
 }
 
+// MACForIP looks up which device currently holds the given IP, by
+// scanning the live-state IP fields. Used by the bandwidth sampler
+// to map conntrack source addresses back to a stable MAC identity.
+//
+// Returns ("", false) if no device with that IP is known. O(N) over
+// the device list — fine at LAN scale (10-50 devices).
+func (r *Registry) MACForIP(ip string) (string, bool) {
+	if ip == "" {
+		return "", false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for mac, d := range r.devices {
+		if d.IP == ip {
+			return mac, true
+		}
+	}
+	return "", false
+}
+
 // --- write paths ------------------------------------------------------------
 
 // Update applies a partial mutation to a known device. patch is a

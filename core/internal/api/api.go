@@ -25,6 +25,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/applycoord"
+	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/subscription"
@@ -60,6 +61,7 @@ type Server struct {
 	subFetcher      *subscription.Fetcher
 	routingProvider func() (routing.Result, error)
 	applyCoord      *applycoord.Coordinator
+	bandwidth       *bandwidth.Tracker
 	guest           *guest.Registry
 	notify          *notify.Store
 	notifyBot       *notify.Bot
@@ -161,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountSubscriptions(r)
 		s.MountRouting(r)
 		s.MountApply(r)
+		s.MountBandwidth(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

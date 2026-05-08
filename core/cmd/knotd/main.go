@@ -32,6 +32,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/applycoord"
+	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/singbox"
 	"github.com/knot-os/knot-os/core/internal/subscription"
@@ -519,6 +520,23 @@ func main() {
 		logger.Fatalf("apply coordinator: %v", err)
 	}
 	apiSrv.SetApplyCoordinator(applyCoord)
+
+	// Per-device bandwidth metering. The sampler reads
+	// /proc/net/nf_conntrack every 2s, aggregates by source IP,
+	// resolves IP→MAC via the device registry, and pushes samples
+	// into the tracker's ring buffers. The non-Linux build is a
+	// no-op stub, so this is safe to wire unconditionally.
+	bwTracker := bandwidth.NewTracker()
+	apiSrv.SetBandwidthTracker(bwTracker)
+	go func() {
+		// LAN CIDR is read at startup; if the user changes it later,
+		// next boot picks up the new value. Worth the simplicity.
+		lan := ""
+		if cfg.Network.LAN != nil {
+			lan = cfg.Network.LAN.CIDR
+		}
+		bandwidth.NewLinuxSampler(bwTracker, devices, lan).Run(ctx)
+	}()
 	if tlsMaterials != nil {
 		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
 			return leafSubjectFor(apiSrv.Snapshot())
