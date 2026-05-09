@@ -198,7 +198,11 @@
 			"rec_router_no_cable": "Plug an Ethernet cable in to use full router mode. Without one, you can still set up Wi-Fi extender mode.",
 			"rec_extender_only": "We'll set this up as a Wi-Fi extender — joins your existing network and broadcasts its own.",
 			"rescan": "Re-detect hardware",
-			"retry": "Retry"
+			"retry": "Retry",
+			"cable_detected": "Ethernet cable detected — you can switch to router mode now.",
+			"cable_lost": "Ethernet cable disconnected.",
+			"power_hint_title": "If the AP drops when you plug the cable in",
+			"power_hint_body": "On Pi Zero 2W, USB-Ethernet adapters can briefly brown out the SoC and reset the Wi-Fi chip. Use a 5V/3A power supply or a powered USB hub. The AP comes back on its own; just wait 10–15 seconds."
 		},
 		"role": {
 			"title": "What's the job?",

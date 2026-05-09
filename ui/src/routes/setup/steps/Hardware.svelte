@@ -1,31 +1,65 @@
 <script lang="ts">
 	import { _ } from 'svelte-i18n';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import StepCard from '$lib/components/wizard/StepCard.svelte';
 	import { apiGet, ApiTimeoutError } from '$lib/api';
 	import type { CapabilityReport } from '$lib/types';
 	import { wizard } from '../wizard.svelte';
 
-	async function detect() {
-		wizard.capLoading = true;
+	let timer: ReturnType<typeof setInterval> | null = null;
+	let prevEthState = $state(''); // 'cable_in' / 'cable_out' / '' on first probe
+	let cableJustChanged = $state(false);
+
+	// `silent` = background poll: don't flash the spinner, don't drop
+	// the previous good cap on a transient failure. Only the explicit
+	// user-pressed "Re-detect" sets the loading state.
+	async function detect(silent = false) {
+		if (!silent) wizard.capLoading = true;
 		wizard.capError = null;
 		try {
-			wizard.cap = await apiGet<CapabilityReport>('/setup/capability', { timeoutMs: 8000 });
-		} catch (e) {
-			wizard.cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
-			if (e instanceof ApiTimeoutError) {
-				wizard.capError = $_('setup.detect_timeout');
-			} else if (e instanceof Error) {
-				wizard.capError = e.message;
+			const fresh = await apiGet<CapabilityReport>('/setup/capability', {
+				timeoutMs: silent ? 4000 : 8000
+			});
+
+			// Detect cable transitions so the user gets visual feedback —
+			// a small "✓ кабель подключён" toast slides in.
+			const newState = fresh.eth.some((e) => e.link) ? 'cable_in' : 'cable_out';
+			if (prevEthState && prevEthState !== newState) {
+				cableJustChanged = true;
+				setTimeout(() => (cableJustChanged = false), 4000);
 			}
+			prevEthState = newState;
+
+			wizard.cap = fresh;
+		} catch (e) {
+			if (!silent) {
+				wizard.cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
+				if (e instanceof ApiTimeoutError) {
+					wizard.capError = $_('setup.detect_timeout');
+				} else if (e instanceof Error) {
+					wizard.capError = e.message;
+				}
+			}
+			// On a silent poll, leave the previous cap in place —
+			// transient API hiccup shouldn't clear the page.
 		} finally {
-			wizard.capLoading = false;
+			if (!silent) wizard.capLoading = false;
 		}
 	}
 
 	onMount(() => {
-		if (!wizard.cap && !wizard.capLoading) detect();
-		if (!wizard.cap && wizard.capLoading) detect();
+		// Always re-probe on enter — sessionStorage restore can leave
+		// us on this step with a stale cap from a previous run (e.g.
+		// after the setup AP brown-out + reconnect cycle).
+		detect();
+		// Live poll every 3s while on this step, so plugging an
+		// Ethernet cable in is reflected within ~3 seconds without
+		// the user pressing anything.
+		timer = setInterval(() => detect(true), 3000);
+	});
+
+	onDestroy(() => {
+		if (timer !== null) clearInterval(timer);
 	});
 
 	const ethCount = $derived(wizard.cap?.eth.filter((e) => e.link).length ?? 0);
@@ -44,6 +78,26 @@
 			<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-3">{$_('setup.hw.detecting')}</p>
 		</div>
 	{:else}
+		<!-- Live transition toast: cable just plugged / unplugged -->
+		{#if cableJustChanged}
+			<div
+				class="
+					p-3 rounded-md border text-sm flex items-center gap-2
+					{ethCount > 0
+						? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+						: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300'}
+				"
+			>
+				{#if ethCount > 0}
+					<i class="bi bi-check-circle-fill"></i>
+					<span>{$_('setup.hw.cable_detected')}</span>
+				{:else}
+					<i class="bi bi-info-circle"></i>
+					<span>{$_('setup.hw.cable_lost')}</span>
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Pi model card -->
 		<div class="flex items-center gap-3 p-4 rounded-lg bg-brand-50 dark:bg-brand-500/10 border border-brand-100 dark:border-brand-500/20">
 			<div class="w-12 h-12 rounded-full bg-white dark:bg-zinc-800 flex items-center justify-center shrink-0">
@@ -125,14 +179,26 @@
 			<div class="text-xs text-amber-600 dark:text-amber-400">
 				<i class="bi bi-exclamation-triangle mr-1"></i>
 				{wizard.capError}
-				<button type="button" class="underline ml-2" onclick={detect}>
+				<button type="button" class="underline ml-2" onclick={() => detect()}>
 					{$_('setup.hw.retry')}
 				</button>
 			</div>
 		{:else}
-			<button type="button" class="text-xs text-brand-600 dark:text-brand-400 underline" onclick={detect}>
+			<button type="button" class="text-xs text-brand-600 dark:text-brand-400 underline" onclick={() => detect()}>
 				<i class="bi bi-arrow-clockwise mr-1"></i>{$_('setup.hw.rescan')}
 			</button>
 		{/if}
+
+		<!-- Brownout / hardware tip — collapsed by default, expanded
+		     by users who hit the Zero 2W power-glitch issue. -->
+		<details class="text-xs">
+			<summary class="cursor-pointer text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+				<i class="bi bi-lightbulb mr-1"></i>
+				{$_('setup.hw.power_hint_title')}
+			</summary>
+			<p class="mt-2 p-3 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 leading-relaxed">
+				{$_('setup.hw.power_hint_body')}
+			</p>
+		</details>
 	{/if}
 </StepCard>

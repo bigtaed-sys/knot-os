@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { _ } from 'svelte-i18n';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import StepCard from '$lib/components/wizard/StepCard.svelte';
 	import { apiGet } from '$lib/api';
-	import type { ScanResponse } from '$lib/types';
+	import type { ScanResponse, CapabilityReport } from '$lib/types';
 	import { wizard } from '../wizard.svelte';
 
 	const linkedEths = $derived(wizard.cap?.eth.filter((e) => e.link) ?? []);
+
+	let capTimer: ReturnType<typeof setInterval> | null = null;
 
 	async function scan() {
 		wizard.scanning = true;
@@ -20,13 +22,41 @@
 		}
 	}
 
+	// Silent cap refresh — same idea as on the Hardware step. Keeps
+	// the cable-status / WAN-port list current while the user lingers
+	// on this screen, so plugging a cable in here also Just Works.
+	async function refreshCap() {
+		try {
+			wizard.cap = await apiGet<CapabilityReport>('/setup/capability', { timeoutMs: 4000 });
+			// Auto-pick the first cabled interface if the user hasn't
+			// chosen one yet — usually there's exactly one.
+			if (
+				wizard.role === 'wifi-router' &&
+				!wizard.wanInterface &&
+				linkedEths.length > 0
+			) {
+				wizard.wanInterface = linkedEths[0].name;
+			}
+		} catch {
+			// transient — keep previous cap.
+		}
+	}
+
 	onMount(() => {
 		if (wizard.role === 'wifi-extender' && wizard.networks.length === 0 && !wizard.scanning) {
 			scan();
 		}
-		if (wizard.role === 'wifi-router' && !wizard.wanInterface && linkedEths.length > 0) {
-			wizard.wanInterface = linkedEths[0].name;
+		if (wizard.role === 'wifi-router') {
+			refreshCap();
+			capTimer = setInterval(refreshCap, 3000);
+			if (!wizard.wanInterface && linkedEths.length > 0) {
+				wizard.wanInterface = linkedEths[0].name;
+			}
 		}
+	});
+
+	onDestroy(() => {
+		if (capTimer !== null) clearInterval(capTimer);
 	});
 
 	const uplinkSecured = $derived(
