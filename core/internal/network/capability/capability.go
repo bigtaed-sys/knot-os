@@ -209,16 +209,31 @@ func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 		return EthAdapter{}, false
 	}
 
-	// Carrier sense: /sys/class/net/<iface>/carrier reads "1\n" when
-	// the link is up. Reads as "0\n" when down OR returns EINVAL when
-	// the interface is administratively down — in either failure case
-	// we surface link=false. Many USB-Ethernet adapters report "0" if
-	// they were enumerated while in admin-down state but the kernel
-	// brings them up automatically; the live-poll on the wizard page
-	// will pick up the transition within 3 s.
+	// Link sense: prefer /sys/class/net/<iface>/carrier — reads "1"
+	// when an Ethernet cable is plugged in AND the interface is
+	// admin-up AND the PHY has finished negotiation.
+	//
+	// Fallback: operstate. Some USB-Ethernet drivers populate
+	// operstate ("up" / "dormant" / "down") faster than they
+	// publish carrier, and operstate="up" is a strong signal that
+	// the cable is connected.
+	//
+	// Anything else → link=false. The setup HTTP handler does
+	// `ip link set <iface> up` before invoking us so admin-down
+	// is already neutralized.
 	link := false
 	if data, err := os.ReadFile(filepath.Join(sysClassNet, ifname, "carrier")); err == nil {
-		link = strings.TrimSpace(string(data)) == "1"
+		if strings.TrimSpace(string(data)) == "1" {
+			link = true
+		}
+	}
+	if !link {
+		if data, err := os.ReadFile(filepath.Join(sysClassNet, ifname, "operstate")); err == nil {
+			s := strings.TrimSpace(string(data))
+			if s == "up" {
+				link = true
+			}
+		}
 	}
 
 	return EthAdapter{

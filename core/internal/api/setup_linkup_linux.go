@@ -3,6 +3,8 @@
 package api
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,25 +22,20 @@ import (
 // «cable in?» check would read 0 forever until the user explicitly
 // transitions to wifi-router (which UPs the link as part of apply).
 //
-// We walk /sys/class/net, pick interfaces whose `device` symlink
-// resolves through a `usb` path component, and `ip link set <iface>
-// up` them. Best-effort: a failure on one adapter doesn't block the
-// rest. Idempotent — bringing an already-UP interface UP is a no-op.
-//
-// We give the PHY 300 ms to negotiate before returning, so the
-// subsequent carrier read sees the post-negotiation state. That's
-// long enough for Gigabit USB adapters in practice; faster ones come
-// back immediately and the wait is harmless.
+// The function is verbose by design: every step logs to the journal
+// so a misbehaving USB adapter can be diagnosed without instrumenting
+// the source. Logs are prefixed with "setup/linkup:" — grep journal
+// for that on production to see what was tried + what came back.
 func bringUSBEthUp() {
 	const sysClassNet = "/sys/class/net"
 	entries, err := os.ReadDir(sysClassNet)
 	if err != nil {
+		log.Printf("setup/linkup: cannot read %s: %v", sysClassNet, err)
 		return
 	}
-	upped := 0
+	candidates := []string{}
 	for _, e := range entries {
 		name := e.Name()
-		// Skip obvious non-Ethernet candidates.
 		if name == "lo" || strings.HasPrefix(name, "wlan") ||
 			strings.HasPrefix(name, "ap") || strings.HasPrefix(name, "br") {
 			continue
@@ -51,17 +48,64 @@ func bringUSBEthUp() {
 		if !strings.Contains(resolved, "usb") {
 			continue
 		}
-		// `ip link set <iface> up` — runs in <50ms when the iface
-		// is already up, ~150-300ms on fresh adapters where the
-		// PHY needs to negotiate.
-		_ = exec.Command("ip", "link", "set", name, "up").Run()
-		upped++
+		candidates = append(candidates, name)
 	}
-	if upped > 0 {
-		// Give the kernel a moment to publish carrier state after the
-		// link comes up. Empirically 300ms covers RTL8152 / AX88179
-		// negotiation; some Gigabit adapters can take up to a second
-		// on cold plug but the wizard's 3s polling will catch that.
-		time.Sleep(300 * time.Millisecond)
+	if len(candidates) == 0 {
+		log.Printf("setup/linkup: no USB-Ethernet candidates in /sys/class/net")
+		return
 	}
+	log.Printf("setup/linkup: candidates=%v", candidates)
+
+	for _, name := range candidates {
+		// Use absolute path so we're not at the mercy of PATH being
+		// trimmed by systemd. Both /sbin/ip and /usr/sbin/ip are
+		// historically valid on Pi OS; try both.
+		ran := false
+		for _, bin := range []string{"/sbin/ip", "/usr/sbin/ip", "ip"} {
+			var stderr bytes.Buffer
+			cmd := exec.Command(bin, "link", "set", name, "up")
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err != nil {
+				log.Printf("setup/linkup: %s link set %s up: %v (%s)",
+					bin, name, err, strings.TrimSpace(stderr.String()))
+				continue
+			}
+			log.Printf("setup/linkup: %s link set %s up: OK", bin, name)
+			ran = true
+			break
+		}
+		if !ran {
+			log.Printf("setup/linkup: WARN — every `ip` candidate failed for %s; link state will likely read down", name)
+		}
+	}
+
+	// PHY negotiation isn't instant — 800ms covers RTL8152 + AX88179
+	// in our hardware tests. Gigabit adapters in cold-plug can take
+	// up to ~1.5s; the wizard's 3s poll catches those on the next
+	// hit. We don't want to block the API call longer than this.
+	time.Sleep(800 * time.Millisecond)
+
+	// Diagnostic dump — what does the kernel report for each
+	// candidate after the up + sleep? If carrier is 0 here, the
+	// problem is upstream (cable / adapter / kernel driver), not us.
+	for _, name := range candidates {
+		carrier := readSysfsTrim(filepath.Join(sysClassNet, name, "carrier"))
+		operstate := readSysfsTrim(filepath.Join(sysClassNet, name, "operstate"))
+		flags := readSysfsTrim(filepath.Join(sysClassNet, name, "flags"))
+		speed := readSysfsTrim(filepath.Join(sysClassNet, name, "speed"))
+		log.Printf("setup/linkup: %s: carrier=%q operstate=%q flags=%s speed=%q",
+			name, carrier, operstate, flags, speed)
+	}
+}
+
+// readSysfsTrim returns the trimmed contents of a sysfs file, or
+// the literal string "<err:...>" if the read failed. Useful in
+// diagnostic logging where we want one log line per file regardless
+// of failure mode.
+func readSysfsTrim(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "<err:" + err.Error() + ">"
+	}
+	return strings.TrimSpace(string(data))
 }
