@@ -1,9 +1,11 @@
 package capability
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +52,90 @@ func makeFakeSysfs(t *testing.T, interfaces map[string]struct {
 		}
 	}
 	return sysClassNet
+}
+
+// TestProbeReadsCarrier guards the v2026.05.2 fix: EthAdapter.Link
+// must mirror /sys/class/net/<iface>/carrier so the setup wizard
+// can tell whether the Ethernet cable is plugged in.
+//
+// Failure mode this catches: backend forgets to set Link on the
+// struct → wizard always shows «no cable» → user can't pick
+// router mode even with a working cable.
+func TestProbeReadsCarrier(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink-heavy test, skip on Windows")
+	}
+	// Build a sysfs with TWO interfaces — one carrier=1 (cable in),
+	// one carrier=0 (no cable). Both must be detected as USB adapters
+	// but only the first should show Link=true.
+	sysClassNet := makeFakeSysfs(t, map[string]struct {
+		uevent, devPath string
+	}{
+		"eth0": {
+			uevent: `DRIVER=r8152
+PRODUCT=bda/8153/2000
+`,
+			devPath: "devices/platform/soc/usb1/2-1/2-1:1.0",
+		},
+		"eth1": {
+			uevent: `DRIVER=r8152
+PRODUCT=bda/8153/2000
+`,
+			devPath: "devices/platform/soc/usb1/2-2/2-2:1.0",
+		},
+	})
+	// Sprinkle carrier files manually — the helper doesn't know about them.
+	if err := os.WriteFile(filepath.Join(sysClassNet, "eth0", "carrier"),
+		[]byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sysClassNet, "eth1", "carrier"),
+		[]byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Probe{SysClassNet: sysClassNet, ModelFile: "/nonexistent"}.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rep.Eth) != 2 {
+		t.Fatalf("eth len=%d, want 2", len(rep.Eth))
+	}
+	// Order isn't guaranteed; index by interface name.
+	byIf := map[string]EthAdapter{}
+	for _, e := range rep.Eth {
+		byIf[e.Interface] = e
+	}
+	if !byIf["eth0"].Link {
+		t.Errorf("eth0 should have Link=true (carrier=1), got %+v", byIf["eth0"])
+	}
+	if byIf["eth1"].Link {
+		t.Errorf("eth1 should have Link=false (carrier=0), got %+v", byIf["eth1"])
+	}
+	// Both must be flagged USB.
+	if !byIf["eth0"].USB || !byIf["eth1"].USB {
+		t.Errorf("USB flag should be true for both: %+v", rep.Eth)
+	}
+}
+
+// TestProbeJSONUsesNameTag pins the JSON field name the wizard UI
+// reads. Renaming `name` -> `interface` back would silently break
+// the wizard (UI types expect `name`). Caught at marshal time.
+func TestProbeJSONUsesNameTag(t *testing.T) {
+	a := EthAdapter{Interface: "eth0", Driver: "r8152", Link: true, USB: true}
+	js, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"name":"eth0"`) {
+		t.Errorf("JSON missing name=eth0: %s", js)
+	}
+	if !strings.Contains(string(js), `"link":true`) {
+		t.Errorf("JSON missing link=true: %s", js)
+	}
+	if !strings.Contains(string(js), `"usb":true`) {
+		t.Errorf("JSON missing usb=true: %s", js)
+	}
 }
 
 func TestProbeIdentifiesRTL8152(t *testing.T) {

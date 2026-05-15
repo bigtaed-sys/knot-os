@@ -43,10 +43,19 @@ const (
 
 // EthAdapter is one USB-attached Ethernet interface.
 type EthAdapter struct {
-	// Interface is the kernel name, e.g. "eth0".
-	Interface string `json:"interface"`
+	// Interface is the kernel name, e.g. "eth0". JSON-tagged as
+	// "name" to match what the wizard UI expects.
+	Interface string `json:"name"`
 	// Driver is the kernel module bound to it (e.g. "r8152").
 	Driver string `json:"driver,omitempty"`
+	// Link is true when /sys/class/net/<iface>/carrier reads "1" —
+	// i.e. an Ethernet cable is plugged in and the link is up.
+	// Read at probe time, not cached; re-Probe to get a fresh value.
+	Link bool `json:"link"`
+	// USB reports whether this is a USB-attached adapter (vs
+	// onboard PCIe / SoC Ethernet). The setup wizard cares because
+	// USB hot-plug is the user-friendly path.
+	USB bool `json:"usb"`
 	// USBVendor is the lower-case 4-hex-digit vendor ID, e.g. "0bda".
 	USBVendor string `json:"usb_vendor,omitempty"`
 	// USBProduct is the lower-case 4-hex-digit product ID, e.g. "8152".
@@ -200,9 +209,23 @@ func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 		return EthAdapter{}, false
 	}
 
+	// Carrier sense: /sys/class/net/<iface>/carrier reads "1\n" when
+	// the link is up. Reads as "0\n" when down OR returns EINVAL when
+	// the interface is administratively down — in either failure case
+	// we surface link=false. Many USB-Ethernet adapters report "0" if
+	// they were enumerated while in admin-down state but the kernel
+	// brings them up automatically; the live-poll on the wizard page
+	// will pick up the transition within 3 s.
+	link := false
+	if data, err := os.ReadFile(filepath.Join(sysClassNet, ifname, "carrier")); err == nil {
+		link = strings.TrimSpace(string(data)) == "1"
+	}
+
 	return EthAdapter{
 		Interface:  ifname,
 		Driver:     driver,
+		Link:       link,
+		USB:        hasUSBPath || hasUSBID,
 		USBVendor:  vendor,
 		USBProduct: product,
 		Model:      describeAdapter(vendor, product, driver),
