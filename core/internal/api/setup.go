@@ -51,6 +51,10 @@ func (s *Server) handleSetupCapability(w http.ResponseWriter, r *http.Request) {
 	}
 	ch := make(chan result, 1)
 	go func() {
+		// Bring every USB-Ethernet admin-UP first. Without this the
+		// kernel's carrier file reads 0 even on a plugged-in cable
+		// — see setup_linkup_linux.go for the full story.
+		bringUSBEthUp()
 		rep, err := capability.Probe{}.Run()
 		ch <- result{rep, err}
 	}()
