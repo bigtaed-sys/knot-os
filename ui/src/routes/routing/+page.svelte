@@ -31,6 +31,39 @@
 	// whole page.
 	let refreshing = $state<Record<string, boolean>>({});
 
+	// Server ping (TCP-connect RTT from the router). Keyed by outbound
+	// tag "<sub-id>:<srv-id>".
+	type Ping = { ok: boolean; latency_ms?: number; error?: string };
+	let pings = $state<Record<string, Ping>>({});
+	let pinging = $state(false);
+
+	async function pingServers() {
+		pinging = true;
+		try {
+			const r = await apiGet<{ results: ({ tag: string } & Ping)[] }>(
+				'/subscriptions/ping',
+				{ timeoutMs: 20000 }
+			);
+			const next: Record<string, Ping> = {};
+			for (const res of r.results ?? []) {
+				next[res.tag] = { ok: res.ok, latency_ms: res.latency_ms, error: res.error };
+			}
+			pings = next;
+		} catch {
+			/* non-fatal — leave previous pings in place */
+		} finally {
+			pinging = false;
+		}
+	}
+
+	// pingClass picks a colour band for a latency badge.
+	function pingClass(ms?: number): string {
+		if (ms == null) return 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400';
+		if (ms < 150) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400';
+		if (ms < 400) return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
+		return 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400';
+	}
+
 	// Modal state.
 	let showAddSub = $state(false);
 	let addSubURL = $state('');
@@ -98,7 +131,7 @@
 	}
 
 	onMount(() => {
-		load(true);
+		load(true).then(() => pingServers());
 		// Routing decisions can change underneath us when the
 		// scheduler kicks in, so we refresh on a slow interval.
 		timer = setInterval(() => load(false), 15000);
@@ -182,6 +215,8 @@
 		} catch {
 			/* non-fatal */
 		}
+		// New/changed servers → refresh their pings.
+		pingServers();
 	}
 
 	async function removeSub(s: Subscription) {
@@ -319,6 +354,13 @@
 				<i class="bi bi-link-45deg"></i>
 				{$_('routing.add_uri')}
 			</button>
+			<button class="btn btn-ghost ml-auto" onclick={pingServers} disabled={pinging}>
+				{#if pinging}
+					<span class="spinner"></span>{$_('routing.pinging')}
+				{:else}
+					<i class="bi bi-speedometer2"></i>{$_('routing.ping_all')}
+				{/if}
+			</button>
 		</div>
 
 		<!-- Subscriptions list -->
@@ -397,6 +439,7 @@
 						{#if sub.servers.length > 0}
 							<ul class="divide-y divide-zinc-200 dark:divide-zinc-800 -mx-1">
 								{#each sub.servers as srv (srv.id)}
+									{@const ping = pings[`${sub.id}:${srv.id}`]}
 									<li class="px-1 py-2 flex items-center gap-3 text-sm">
 										<i class="bi bi-server text-zinc-400 shrink-0"></i>
 										<div class="flex-1 min-w-0">
@@ -406,6 +449,14 @@
 												{#if srv.outbound.server}· {srv.outbound.server}:{srv.outbound.port}{/if}
 											</div>
 										</div>
+										{#if ping}
+											<span
+												class="text-xs px-2 py-0.5 rounded-md font-mono shrink-0 {pingClass(ping.ok ? ping.latency_ms : undefined)}"
+												title={ping.ok ? '' : ping.error}
+											>
+												{ping.ok ? `${ping.latency_ms} ${$_('routing.ping_ms')}` : $_(`routing.ping_${ping.error}`)}
+											</span>
+										{/if}
 										{#if sub.id === 'manual'}
 											<button
 												class="btn btn-ghost text-sm py-1 px-2 text-red-600"
@@ -635,6 +686,7 @@
 						{#each sub.servers as srv (srv.id)}
 							{@const tag = `${sub.id}:${srv.id}`}
 							{@const selected = pickingFor.route_via === tag}
+							{@const ping = pings[tag]}
 							<button
 								type="button"
 								class="w-full text-left px-3 py-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-3"
@@ -650,6 +702,14 @@
 										{#if srv.outbound.server}· {srv.outbound.server}:{srv.outbound.port}{/if}
 									</div>
 								</div>
+								{#if ping}
+									<span
+										class="text-xs px-2 py-0.5 rounded-md font-mono shrink-0 {pingClass(ping.ok ? ping.latency_ms : undefined)}"
+										title={ping.ok ? '' : ping.error}
+									>
+										{ping.ok ? `${ping.latency_ms} ${$_('routing.ping_ms')}` : $_(`routing.ping_${ping.error}`)}
+									</span>
+								{/if}
 								{#if selected}
 									<i class="bi bi-check2 text-brand-500"></i>
 								{/if}

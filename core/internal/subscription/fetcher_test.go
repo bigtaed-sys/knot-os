@@ -97,6 +97,41 @@ func TestFetcherErrorMarksRegistry(t *testing.T) {
 	}
 }
 
+// TestFetcherFollowsCookieClearanceRedirect reproduces the WAF
+// pattern that produced "stopped after 20 redirects" in the field:
+// the first request gets a 302 that sets a clearance cookie and
+// redirects back to the same path; the endpoint serves the real
+// body only once that cookie is presented. Without a cookie jar the
+// client loops forever; with one it succeeds on the second hop.
+func TestFetcherFollowsCookieClearanceRedirect(t *testing.T) {
+	body := base64.StdEncoding.EncodeToString([]byte(
+		"vless://uuid@a.example.com:443?security=reality&pbk=k&sni=x.com#A"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if c, err := req.Cookie("wafclearance"); err != nil || c.Value != "ok" {
+			// No clearance cookie yet → set it and bounce back to self,
+			// exactly like DDoS-Guard / Cloudflare's first hop.
+			http.SetCookie(w, &http.Cookie{Name: "wafclearance", Value: "ok", Path: "/"})
+			http.Redirect(w, req, req.URL.Path, http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	r := newRegInTempDir(t)
+	added, _ := r.Add(Subscription{DisplayName: "WAF", URL: srv.URL})
+
+	f := NewFetcher()
+	if _, _, err := f.FetchAndApply(context.Background(), r, added.ID); err != nil {
+		t.Fatalf("fetch behind cookie-clearance WAF: %v", err)
+	}
+	got, _ := r.Get(added.ID)
+	if len(got.Servers) != 1 {
+		t.Errorf("servers=%d, want 1", len(got.Servers))
+	}
+}
+
 func TestFetcherRejectsNonHTTPURL(t *testing.T) {
 	r := newRegInTempDir(t)
 	r.subs["bad"] = &Subscription{ID: "bad", URL: "ftp://example.com/sub"}

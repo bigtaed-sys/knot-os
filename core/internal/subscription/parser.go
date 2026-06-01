@@ -456,6 +456,13 @@ func applyTransport(o *singbox.Outbound, q url.Values) {
 		o.GRPCName = firstNonEmpty(q.Get("serviceName"), q.Get("path"))
 	case "http":
 		o.HTTPPath = q.Get("path")
+	case "xhttp", "splithttp":
+		// xhttp is Xray-only; normalize the older "splithttp" alias to
+		// the current name so the engine selector sees one transport.
+		o.Transport = "xhttp"
+		o.XHTTPPath = q.Get("path")
+		o.XHTTPHost = firstNonEmpty(q.Get("host"), q.Get("Host"))
+		o.XHTTPMode = q.Get("mode")
 	}
 }
 

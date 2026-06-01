@@ -32,7 +32,8 @@ param(
     [int]$BaudRate = 115200,
 
     [switch]$SkipBuild,
-    [string]$Version = '0.1.0-dev'
+    # CalVer dev default: <year>.<month>.0-dev. Pass -Version to override.
+    [string]$Version = "$(Get-Date -Format 'yyyy.MM').0-dev"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,13 +67,30 @@ Write-Host ("    knotd: {0:N0} bytes" -f $size)
 # ---- 2a. HTTP transport -------------------------------------------------
 
 if ($PSCmdlet.ParameterSetName -eq 'Http') {
+    # KnotOS 301-redirects plain HTTP to HTTPS once setup is done, and
+    # PowerShell drops the POST body when it follows a 301 (turns it
+    # into a GET). So we talk HTTPS directly: if no scheme is given,
+    # default to https:// rather than http://.
+    #
     # $Address is the parameter; $Host is a PowerShell builtin
     # (the host UI), do NOT use it.
     if ($Address -match '^https?://') {
         $base = $Address.TrimEnd('/')
     } else {
-        $base = "http://$Address"
+        $base = "https://$Address"
     }
+
+    # The device serves a per-device self-signed root CA, which PS 5.1
+    # will not trust ("could not establish trust relationship"). Force
+    # TLS 1.2 and accept the device cert unconditionally - this is the
+    # user's own router on the LAN, reached by IP, so there is no
+    # meaningful MITM surface to protect here. (-SkipCertificateCheck
+    # only exists on PowerShell 7+, hence the callback.)
+    [System.Net.ServicePointManager]::SecurityProtocol = `
+        [System.Net.SecurityProtocolType]::Tls12 -bor `
+        [System.Net.SecurityProtocolType]::Tls11 -bor `
+        [System.Net.SecurityProtocolType]::Tls
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 
     if (-not $Password) {
         $Password = Read-Host -AsSecureString 'Admin password' |
@@ -93,7 +111,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Http') {
     # Look for a sidecar signature next to the binary. Production
     # release pipelines emit dist/arm64/knotd alongside .sig with
     # the Ed25519 signature over the binary bytes. When the .sig
-    # is absent we fall back to the raw octet-stream upload — which
+    # is absent we fall back to the raw octet-stream upload - which
     # the daemon accepts only on dev-key-empty builds.
     $sigPath = "$binPath.sig"
     $hasSig  = Test-Path $sigPath
@@ -147,7 +165,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Http') {
             throw
         }
     } else {
-        Write-Host "    no .sig sidecar found at $sigPath — using legacy unsigned upload"
+        Write-Host "    no .sig sidecar found at $sigPath - using legacy unsigned upload"
         Write-Host "    (this fails on production-keyed builds; build with the release CI to get a .sig)"
         $bytes = [System.IO.File]::ReadAllBytes($binPath)
         try {
@@ -177,7 +195,7 @@ Write-Host '    This is slow (~10 KB/s) - expect ~12 minutes for a 7 MB binary.'
 Write-Host ''
 Write-Host '    On the device, log in via the same COM port and run:'
 Write-Host '        sudo knot-update-receive' -ForegroundColor Yellow
-Write-Host '    The receiver detaches itself into a background session — the'
+Write-Host '    The receiver detaches itself into a background session - the'
 Write-Host '    serial-getty is stopped, /dev/<tty> is reopened directly, so'
 Write-Host '    closing your terminal here will not kill it.'
 Write-Host ''
@@ -237,7 +255,7 @@ try {
     }
 
     $port.WriteLine('KNOTUPDATE-END')
-    Write-Host '==> Sent. Watching for completion (up to 60s)…'
+    Write-Host '==> Sent. Watching for completion (up to 60s)...'
 
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {

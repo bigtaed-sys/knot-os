@@ -182,7 +182,7 @@ func TestBuildDeterministic(t *testing.T) {
 	}
 }
 
-func TestBuildEnablesTUNWhenOutboundsPresent(t *testing.T) {
+func TestBuildEnablesTUNWhenDeviceRouted(t *testing.T) {
 	// No user outbounds → TUN stays off (no point bringing up an
 	// interface to route nothing).
 	res, _ := Build(Inputs{LANCIDR: "192.168.42.0/24"})
@@ -190,16 +190,147 @@ func TestBuildEnablesTUNWhenOutboundsPresent(t *testing.T) {
 		t.Error("TUN should not be set when there are no user outbounds")
 	}
 
-	// Outbound present → TUN auto-route on.
+	// An outbound exists but no device is pinned to it → still off.
+	// The TUN only matters once a device actually needs to be routed.
 	res, _ = Build(Inputs{
 		LANCIDR:   "192.168.42.0/24",
 		Outbounds: []singbox.Outbound{fakeOutbound("p:s")},
 	})
+	if res.Config.TUN != nil {
+		t.Error("TUN should stay off when no device is routed, even with a server present")
+	}
+
+	// A device pinned to the server → TUN auto-route on.
+	res, _ = Build(Inputs{
+		LANCIDR:   "192.168.42.0/24",
+		Outbounds: []singbox.Outbound{fakeOutbound("p:s")},
+		Devices: []deviceregistry.Device{
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.5", ProfileID: "kids"},
+		},
+		Profiles: []profile.Profile{
+			{ID: "kids", Name: "Kids", RouteVia: "p:s"},
+		},
+	})
 	if res.Config.TUN == nil {
-		t.Fatal("TUN should be set when at least one user outbound exists")
+		t.Fatal("TUN should be set when at least one device is routed")
 	}
 	if !res.Config.TUN.AutoRoute || !res.Config.TUN.StrictRoute {
 		t.Errorf("TUN should default to AutoRoute+StrictRoute, got %+v", res.Config.TUN)
+	}
+}
+
+func TestBuildDropsUnrenderableOutboundAndKillSwitches(t *testing.T) {
+	// A server NEITHER engine can render (here: a bogus transport)
+	// must not fail the whole build. It's dropped from both configs,
+	// and any device pinned to it is kill-switched (block) and
+	// reported in MissingOutbounds — never left leaking via direct.
+	bad := singbox.Outbound{
+		Tag:       "vpnus:bad",
+		Type:      singbox.OutboundVLESS,
+		Server:    "example.com",
+		Port:      443,
+		UUID:      "u",
+		Transport: "carrier-pigeon", // unsupported by sing-box AND xray
+	}
+	res, err := Build(Inputs{
+		LANCIDR:   "192.168.42.0/24",
+		Outbounds: []singbox.Outbound{bad},
+		Devices: []deviceregistry.Device{
+			{MAC: "aa:bb:cc:dd:ee:02", IP: "192.168.42.7", ProfileID: "me"},
+		},
+		Profiles: []profile.Profile{
+			{ID: "me", Name: "Me", RouteVia: "vpnus:bad"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build should not error on an unrenderable outbound: %v", err)
+	}
+	// The bad outbound is not in the rendered config.
+	for _, o := range res.Config.Outbounds {
+		if o.Tag == "vpnus:bad" {
+			t.Error("unrenderable outbound should have been dropped from the config")
+		}
+	}
+	// The rendered config is actually valid (this is the whole point).
+	if _, err := res.Config.RenderJSON(); err != nil {
+		t.Fatalf("config with a dropped outbound should still render: %v", err)
+	}
+	// The device is kill-switched, not direct.
+	dr := res.DeviceRoutes["aa:bb:cc:dd:ee:02"]
+	if dr.Status != "kill" || dr.Outbound != "block" {
+		t.Errorf("device pinned to a dropped server should kill-switch, got %+v", dr)
+	}
+	if len(res.MissingOutbounds) != 1 || res.MissingOutbounds[0] != "vpnus:bad" {
+		t.Errorf("dropped server should be reported missing, got %v", res.MissingOutbounds)
+	}
+	// And the kill-switch is enforceable: TUN is up so block applies.
+	if res.Config.TUN == nil {
+		t.Error("TUN should be set so the kill-switch (block) is actually enforced")
+	}
+}
+
+func TestBuildRoutesXHTTPServerThroughXray(t *testing.T) {
+	// An xhttp server sing-box can't speak is hosted by Xray: it
+	// shows up as an Xray upstream, sing-box gets a matching loopback
+	// SOCKS outbound, and a device pinned to it tunnels (not kills).
+	xh := singbox.Outbound{
+		Tag:       "vpnus:xh",
+		Type:      singbox.OutboundVLESS,
+		Server:    "edge.example.com",
+		Port:      443,
+		UUID:      "11111111-2222-3333-4444-555555555555",
+		Transport: "xhttp",
+		XHTTPPath: "/d",
+		TLS: &singbox.TLSOptions{
+			Enabled: true, SNI: "www.microsoft.com",
+			REALITY: &singbox.REALITYOptions{Enabled: true, PublicKey: "PBK"},
+		},
+	}
+	res, err := Build(Inputs{
+		LANCIDR:   "192.168.42.0/24",
+		Outbounds: []singbox.Outbound{xh},
+		Devices: []deviceregistry.Device{
+			{MAC: "aa:bb:cc:dd:ee:03", IP: "192.168.42.9", ProfileID: "me"},
+		},
+		Profiles: []profile.Profile{
+			{ID: "me", Name: "Me", RouteVia: "vpnus:xh"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// Xray hosts it.
+	if len(res.XrayConfig.Upstreams) != 1 || res.XrayConfig.Upstreams[0].Tag != "vpnus:xh" {
+		t.Fatalf("xhttp server should be an xray upstream, got %+v", res.XrayConfig.Upstreams)
+	}
+	port := res.XrayConfig.Upstreams[0].SocksPort
+	// sing-box has a matching socks outbound pointing at the loopback port.
+	var found bool
+	for _, o := range res.Config.Outbounds {
+		if o.Tag == "vpnus:xh" {
+			found = true
+			if o.Type != singbox.OutboundSocks || o.Server != "127.0.0.1" || o.Port != port {
+				t.Errorf("sing-box socks outbound wrong: %+v (want port %d)", o, port)
+			}
+		}
+	}
+	if !found {
+		t.Error("sing-box config missing the loopback socks outbound for the xray-hosted server")
+	}
+	// The device tunnels through it, not kill-switched.
+	dr := res.DeviceRoutes["aa:bb:cc:dd:ee:03"]
+	if dr.Status != "tunnel" || dr.Outbound != "vpnus:xh" {
+		t.Errorf("device should tunnel via xray-hosted server, got %+v", dr)
+	}
+	if len(res.MissingOutbounds) != 0 {
+		t.Errorf("xhttp server is usable via xray, should not be missing: %v", res.MissingOutbounds)
+	}
+	// Both engine configs render cleanly.
+	if _, err := res.Config.RenderJSON(); err != nil {
+		t.Errorf("sing-box render: %v", err)
+	}
+	if _, err := res.XrayConfig.RenderJSON(); err != nil {
+		t.Errorf("xray render: %v", err)
 	}
 }
 

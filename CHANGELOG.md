@@ -4,6 +4,39 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.1] — 2026-06-02
+
+Theme: **"Two engines, one tunnel — and it actually routes"**. The per-device VPN path is now reliable end-to-end on real hardware, gains a second proxy engine for the transports sing-box won't speak, and the setup wizard / subscription flow shed a string of first-boot papercuts.
+
+### Per-device routing now actually carries traffic
+
+- **The forward-chain fix.** The nftables `forward` chain (`policy drop`) only ever allowed `LAN ↔ WAN`, so once sing-box brought up its TUN, every tunneled device's packets (`LAN → knotvpn0`) hit the drop and died — "status: tunnel" with no internet. Both the router and extender rulesets now accept `LAN ↔ knotvpn0`. The TUN interface name is a shared constant (`singbox.TUNInterfaceName`) so the renderer and the firewall can't drift.
+- **Routing changes take effect immediately.** Assigning a profile/device to a server (or refreshing a subscription) now fires the apply chain that re-renders sing-box — previously only the ad-block scheduler was kicked, so the tunnel assignment silently never reached the engine. The apply chain also runs once at boot, so tunnels (and WireGuard) come back up after a reboot without poking a setting.
+- **A single unsupported server no longer takes everything down.** Outbounds sing-box can't render are dropped from its config (not fatal), and any device pinned to one trips the kill-switch instead of leaking direct. The TUN comes up whenever any device is routed, so the kill-switch is actually enforced even when every subscribed server is unusable.
+
+### Xray-core alongside sing-box
+
+- **`xhttp` (and the rest of the Xray-only matrix) now work.** sing-box keeps the TUN + per-device routing; servers it can't speak are hosted by a local **Xray-core** instance behind loopback SOCKS inbounds, which sing-box dials. The routing layer partitions each server: sing-box-native, Xray-via-SOCKS, or dropped. New `core/internal/xray` package (config render + manager), Linux supervisor, image stage `04-xray`, pinned version, deterministic SOCKS-port assignment.
+
+### Routing UI
+
+- **Server ping.** TCP-connect latency probe from the router to every server (`GET /api/subscriptions/ping`), shown as colour-banded badges in the server list and the picker. Works for every server regardless of engine support.
+
+### Subscriptions
+
+- **WAF redirect loops fixed.** The HTTP client gained a cookie jar, so DDoS-Guard / Cloudflare / Qrator clearance-cookie challenges no longer loop until "stopped after 20 redirects".
+
+### Setup wizard
+
+- Cable detection unified with the capability probe (USB-Ethernet adapters identified by uevent `PRODUCT=`, not just a `"usb"` path substring), so the wizard finally sees an RTL8152 on a Zero 2W and lets you pick the full-router role.
+- `POST /setup/complete` 422 fixed: the wizard sent `device_name`/`country` flat while the backend expected a nested `device` object.
+- Live Wi-Fi QR is now a real PNG (rendered server-side via the existing go-qrcode), not the raw `WIFI:` string.
+- PPPoE WAN is greyed out with an "in development" tag (the backend only supports DHCP).
+
+### Self-update
+
+- The System page's manual update accepts an optional `.sig` file, so a rescue-key-signed binary can be installed straight from the browser (multipart) on production-keyed builds.
+
 ## [2026.05.1] — 2026-05-07
 
 Theme: **"Per-device VPN, Happ-style"**. KnotOS gains a real subscription-driven VPN client that any LAN device can be routed through, picked per-profile from the admin UI or Telegram, with kill-switch and DNS-leak prevention by default.

@@ -19,6 +19,12 @@ const (
 	OutboundTrojan      OutboundType = "trojan"
 	OutboundShadowsocks OutboundType = "shadowsocks"
 	OutboundWireGuard   OutboundType = "wireguard"
+	// OutboundSocks is a plain SOCKS5 dial. We use it to chain
+	// sing-box to a locally-running Xray instance: servers whose
+	// protocol/transport sing-box can't speak (e.g. xhttp) are
+	// hosted by Xray, which exposes a localhost SOCKS inbound, and
+	// sing-box reaches them through one of these.
+	OutboundSocks OutboundType = "socks"
 )
 
 // Outbound is one server-or-policy. Knotd holds these in memory,
@@ -81,6 +87,16 @@ type Outbound struct {
 	GRPCName  string // service name for gRPC transport
 	HTTPPath  string
 
+	// XHTTP* carry the Xray-only "xhttp" (formerly "splithttp")
+	// transport parameters. sing-box can't speak xhttp, so an
+	// outbound with Transport == "xhttp" is rendered by the Xray
+	// engine instead (see core/internal/xray). They live on the one
+	// shared Outbound model so a parsed server round-trips through
+	// whichever engine ends up hosting it.
+	XHTTPPath string
+	XHTTPHost string
+	XHTTPMode string
+
 	// --- WireGuard --------------------------------------------
 
 	// WGPrivateKey is the peer's private key (base64). Required
@@ -106,6 +122,17 @@ type Outbound struct {
 	// URLTestTolerance, in milliseconds, prevents flapping when
 	// two members have similar latency.
 	URLTestToleranceMS int
+}
+
+// Renderable reports nil if this outbound can be encoded into a
+// valid sing-box config, or the encode error otherwise. The routing
+// layer calls this to drop servers sing-box can't speak — e.g. the
+// Xray-only "xhttp" transport — instead of letting one bad server
+// fail the entire config render, which would stop sing-box for every
+// device rather than just the one pinned to the unsupported server.
+func (o Outbound) Renderable() error {
+	_, err := o.toJSON()
+	return err
 }
 
 // toJSON converts an Outbound to the map shape sing-box parses.
@@ -187,6 +214,13 @@ func (o Outbound) toJSON() (map[string]any, error) {
 		}
 		out["method"] = o.Method
 		out["password"] = o.Password
+
+	case OutboundSocks:
+		// Local SOCKS5 chain to the Xray engine. server/server_port
+		// were set by the shared block above; sing-box defaults the
+		// rest. No TLS, no transport — it's a loopback hop.
+		out["version"] = "5"
+		return out, nil
 
 	case OutboundWireGuard:
 		if o.WGPrivateKey == "" || o.WGPeerPublicKey == "" {

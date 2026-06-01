@@ -101,8 +101,8 @@ func (m *Manager) Apply(ctx context.Context, cfg Config) error {
 	confPath := m.confPath
 	m.mu.Unlock()
 
-	wantRun := hasUserOutbounds(cfg)
-	prevRun := prevHad && hasUserOutbounds(prev)
+	wantRun := wantsRun(cfg)
+	prevRun := prevHad && wantsRun(prev)
 
 	if m.runner == nil {
 		return nil
@@ -186,6 +186,16 @@ func (m *Manager) writeConfig(data []byte) error {
 		return err
 	}
 	return os.Rename(tmpName, m.confPath)
+}
+
+// wantsRun decides whether the supervisor should have sing-box up
+// for this config. True when there's a real-server outbound to dial
+// OR a TUN inbound is configured — the latter covers the kill-switch
+// case where every subscribed server is gone/unusable but a device
+// is still pinned to one and must be blocked (TUN + block) rather
+// than leaking via direct.
+func wantsRun(c Config) bool {
+	return c.TUN != nil || hasUserOutbounds(c)
 }
 
 // hasUserOutbounds is true when the Config contains at least one

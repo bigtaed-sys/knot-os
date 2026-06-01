@@ -153,9 +153,14 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If the profile assignment changed, ask the scheduler to
-	// re-evaluate now instead of waiting up to 30s.
+	// re-evaluate now instead of waiting up to 30s, and rebuild
+	// routing: the new profile may carry a RouteVia tunnel, so
+	// sing-box needs its per-device source-IP rule refreshed.
+	// Without this the device's traffic keeps going direct until
+	// the next full config-apply or reboot.
 	if body.ProfileID != nil {
 		s.kick()
+		s.fireConfigApplied(s.Snapshot())
 	}
 
 	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))

@@ -3,13 +3,13 @@
 	import StepCard from '$lib/components/wizard/StepCard.svelte';
 	import InlineHelp from '$lib/components/wizard/InlineHelp.svelte';
 	import { wizard } from '../wizard.svelte';
+	import { API_BASE } from '$lib/api';
 
-	// Live QR — generates client-side, never leaves the browser.
-	// Uses a tiny QR library bundled into the app; for now we render
-	// via the wifi:// URL into a server-rendered fallback. To keep
-	// the change small, just embed the WIFI URL string for now and
-	// render a real QR via the `qrcode` package if available — else
-	// show the text. We can wire a real QR generator in a follow-up.
+	// Live QR — the WIFI: join string is rendered to a PNG by the
+	// daemon's /api/setup/qr endpoint (same go-qrcode the WireGuard
+	// peer QR uses), so the UI bundle carries no QR dependency. The
+	// <img> src is reactive: as the user edits the SSID/PSK the
+	// browser re-fetches the encoded code.
 	function wifiURI(ssid: string, psk: string): string {
 		// WIFI:T:WPA;S:<ssid>;P:<psk>;H:false;
 		const esc = (s: string) =>
@@ -19,6 +19,7 @@
 	}
 
 	const uri = $derived(wifiURI(wizard.apSSID, wizard.apPSK));
+	const qrSrc = $derived(`${API_BASE}/setup/qr?text=${encodeURIComponent(uri)}`);
 
 	const canNext = $derived.by(() => {
 		if (wizard.apSSID.length === 0 || wizard.apSSID.length > 32) return false;
@@ -142,12 +143,14 @@
 				{$_('setup.wifi.qr_preview')}
 			</div>
 			{#if canNext}
-				<!-- Simple SVG: compute QR via browser canvas at runtime -->
-				<!-- For now: render the WIFI URI as text in a styled card; full QR-image rendering goes through the existing qrcode lib in a follow-up patch -->
 				<div class="p-3 bg-white border border-zinc-200 rounded-lg flex flex-col items-center gap-2">
-					<div class="w-32 h-32 grid place-items-center bg-zinc-50 rounded font-mono text-[7px] text-zinc-700 break-all p-2 leading-tight">
-						{uri.slice(0, 80)}…
-					</div>
+					<img
+						src={qrSrc}
+						alt={$_('setup.wifi.qr_preview')}
+						width="128"
+						height="128"
+						class="w-32 h-32 rounded"
+					/>
 					<p class="text-[10px] text-center text-zinc-500 leading-tight">
 						{$_('setup.wifi.qr_help')}
 					</p>

@@ -3,7 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -41,6 +45,9 @@ func (s *Server) MountSubscriptions(r chi.Router) {
 	}
 	r.Get("/subscriptions", s.handleSubsList)
 	r.Post("/subscriptions", s.handleSubsAdd)
+	// Static path registered before the {id} wildcard so chi routes
+	// "ping" to the prober, not to handleSubsGet with id="ping".
+	r.Get("/subscriptions/ping", s.handlePingServers)
 	r.Get("/subscriptions/{id}", s.handleSubsGet)
 	r.Patch("/subscriptions/{id}", s.handleSubsPatch)
 	r.Delete("/subscriptions/{id}", s.handleSubsDelete)
@@ -129,6 +136,10 @@ func (s *Server) handleSubsDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
+	// Removing a subscription drops its outbounds — rebuild routing so
+	// any device pinned to one of them flips to the kill-switch instead
+	// of silently leaking direct.
+	s.fireConfigApplied(s.Snapshot())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -153,6 +164,10 @@ func (s *Server) handleSubsRefresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
+	// A refresh can add, change, or drop servers; rebuild routing so
+	// new outbounds become usable and vanished ones trip the
+	// kill-switch on the devices that pointed at them.
+	s.fireConfigApplied(s.Snapshot())
 	got, _ := s.subs.Get(id)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"subscription":          got,
@@ -181,6 +196,7 @@ func (s *Server) handleSubsManualAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
+	s.fireConfigApplied(s.Snapshot())
 	writeJSON(w, http.StatusCreated, srv)
 }
 
@@ -194,7 +210,69 @@ func (s *Server) handleSubsManualRemove(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
 		return
 	}
+	s.fireConfigApplied(s.Snapshot())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// pingResult is one server's reachability probe outcome.
+type pingResult struct {
+	Tag       string `json:"tag"`
+	OK        bool   `json:"ok"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// handlePingServers TCP-connects to every subscription server's
+// host:port and reports the round-trip time. This is a plain
+// reachability/latency probe from the router itself — it does NOT
+// perform a proxy handshake, so it works for every server regardless
+// of whether the engine can speak its protocol (an xhttp server still
+// gets a ping even though sing-box can't tunnel through it). Probes
+// run concurrently with a small worker cap and a short per-dial
+// timeout so the whole sweep returns in a couple seconds at most.
+func (s *Server) handlePingServers(w http.ResponseWriter, r *http.Request) {
+	outs := s.subs.AllOutbounds()
+	results := make([]pingResult, len(outs))
+
+	const (
+		workers     = 16
+		dialTimeout = 3 * time.Second
+	)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, o := range outs {
+		if o.Server == "" || o.Port <= 0 {
+			results[i] = pingResult{Tag: o.Tag, Error: "noaddr"}
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, tag, addr string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			start := time.Now()
+			d := net.Dialer{Timeout: dialTimeout}
+			conn, err := d.DialContext(r.Context(), "tcp", addr)
+			if err != nil {
+				results[i] = pingResult{Tag: tag, Error: shortDialError(err)}
+				return
+			}
+			_ = conn.Close()
+			results[i] = pingResult{Tag: tag, OK: true, LatencyMS: time.Since(start).Milliseconds()}
+		}(i, o.Tag, net.JoinHostPort(o.Server, strconv.Itoa(o.Port)))
+	}
+	wg.Wait()
+
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// shortDialError collapses a verbose net dial error into a one-word
+// reason the UI can show in a badge.
+func shortDialError(err error) string {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return "timeout"
+	}
+	return "unreachable"
 }
 
 func errsToStrings(errs []error) []string {

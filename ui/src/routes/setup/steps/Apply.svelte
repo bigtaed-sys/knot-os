@@ -20,8 +20,10 @@
 		// coordinator. We watch the response for apply_id and surface
 		// the rollback reason if any.)
 		const body: any = {
-			device_name: wizard.deviceName,
-			country: wizard.country,
+			device: {
+				name: wizard.deviceName,
+				country: wizard.country
+			},
 			password: wizard.password,
 			role: wizard.role,
 			ap: {

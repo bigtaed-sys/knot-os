@@ -49,6 +49,12 @@ const ConfigPath = "/run/knot/sing-box.json"
 // BinPath is where 00-run.sh installs the static binary.
 const BinPath = "/usr/local/bin/sing-box"
 
+// TUNInterfaceName is the name of the virtual interface sing-box
+// brings up for the TUN inbound. The Linux backend references it when
+// building nftables forward rules (LAN ↔ tun), so it lives here as the
+// single source of truth shared between the renderer and apply_router.
+const TUNInterfaceName = "knotvpn0"
+
 // LocalAPIPort is sing-box's clash-compatible API. knotd reads
 // stats from it (selected outbound, per-server delays, traffic
 // counters). Bound to localhost only; not exposed on the LAN.
@@ -265,7 +271,7 @@ func (c Config) RenderJSON() ([]byte, error) {
 	if c.TUN != nil {
 		ifaceName := c.TUN.InterfaceName
 		if ifaceName == "" {
-			ifaceName = "knotvpn0"
+			ifaceName = TUNInterfaceName
 		}
 		addrs := c.TUN.Address
 		if len(addrs) == 0 {

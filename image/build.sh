@@ -42,6 +42,7 @@ STAGE_DIR="$ROOT/image/stage-knot"
 FILES_DIR="$STAGE_DIR/00-install-knotd/files"
 PLUGINS_FILES_DIR="$STAGE_DIR/01-install-plugins/files"
 SINGBOX_FILES_DIR="$STAGE_DIR/03-singbox/files"
+XRAY_FILES_DIR="$STAGE_DIR/04-xray/files"
 
 # ---- Pre-flight ------------------------------------------------------------
 
@@ -173,6 +174,71 @@ fi
 install -m 755 "$EXTRACTED_BIN" "$SINGBOX_BIN"
 rm -rf "$TMP_EXTRACT"
 echo "    sing-box: $(stat -c '%s' "$SINGBOX_BIN") bytes (v${SINGBOX_VERSION})"
+
+# ---- 3c. Fetch + verify Xray-core binary ----------------------------------
+#
+# Xray runs alongside sing-box for the transports sing-box won't
+# implement (chiefly xhttp). Version pinned in core/internal/xray/
+# xray.go (const Version); same resolve-via-go-run trick as sing-box.
+# The upstream asset is a ZIP (not a tarball) containing the `xray`
+# binary plus geo data — we extract just the binary.
+
+echo "==> [3c/7] Staging Xray-core binary"
+mkdir -p "$XRAY_FILES_DIR" "$CACHE_DIR"
+
+XRAY_VERSION="$(run_user env GOFLAGS=-mod=mod \
+    go run "$ROOT/core/cmd/print-xray-version" 2>/dev/null || true)"
+if [[ -z "$XRAY_VERSION" ]]; then
+    XRAY_VERSION="$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+[^"]*"' \
+        "$ROOT/core/internal/xray/xray.go" | head -1 | \
+        sed -E 's/.*"([^"]+)"/\1/')"
+fi
+if [[ -z "$XRAY_VERSION" ]]; then
+    echo "fatal: could not determine Xray version from xray.go" >&2
+    exit 1
+fi
+
+# linux-arm64 (ARMv8). Source: https://github.com/XTLS/Xray-core/releases
+XRAY_ZIP_NAME="Xray-linux-arm64-v8a.zip"
+XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/${XRAY_ZIP_NAME}"
+XRAY_CACHED="$CACHE_DIR/Xray-${XRAY_VERSION}-linux-arm64-v8a.zip"
+XRAY_BIN="$XRAY_FILES_DIR/xray"
+
+# Pinned SHA-256 of the upstream zip. Empty = first-build mode:
+# the hash is printed for the developer to paste back.
+case "$XRAY_VERSION" in
+    *)       XRAY_SHA256="" ;;
+esac
+
+if [[ ! -f "$XRAY_CACHED" ]]; then
+    echo "    downloading $XRAY_URL"
+    curl -fL --progress-bar -o "$XRAY_CACHED" "$XRAY_URL"
+fi
+
+XRAY_ACTUAL_SHA="$(sha256sum "$XRAY_CACHED" | awk '{print $1}')"
+if [[ -n "$XRAY_SHA256" ]]; then
+    if [[ "$XRAY_ACTUAL_SHA" != "$XRAY_SHA256" ]]; then
+        echo "fatal: xray ${XRAY_VERSION} sha256 mismatch" >&2
+        echo "       expected: $XRAY_SHA256" >&2
+        echo "       actual:   $XRAY_ACTUAL_SHA" >&2
+        exit 1
+    fi
+else
+    echo "    note: no pinned sha256 for xray ${XRAY_VERSION}; recording $XRAY_ACTUAL_SHA"
+fi
+
+# Extract just the binary out of the zip.
+XRAY_TMP_EXTRACT="$(mktemp -d)"
+unzip -o -q "$XRAY_CACHED" -d "$XRAY_TMP_EXTRACT"
+XRAY_EXTRACTED_BIN="$(find "$XRAY_TMP_EXTRACT" -type f -name 'xray' | head -1)"
+if [[ -z "$XRAY_EXTRACTED_BIN" ]]; then
+    echo "fatal: xray binary not found inside $XRAY_ZIP_NAME" >&2
+    rm -rf "$XRAY_TMP_EXTRACT"
+    exit 1
+fi
+install -m 755 "$XRAY_EXTRACTED_BIN" "$XRAY_BIN"
+rm -rf "$XRAY_TMP_EXTRACT"
+echo "    xray: $(stat -c '%s' "$XRAY_BIN") bytes (v${XRAY_VERSION})"
 
 # ---- 4. Download Pi OS Lite (cached) --------------------------------------
 

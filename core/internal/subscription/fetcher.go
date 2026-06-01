@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"time"
 )
@@ -67,6 +68,18 @@ func NewFetcher() *Fetcher {
 	return &Fetcher{
 		Client: &http.Client{
 			Timeout: DefaultFetchTimeout,
+			// A cookie jar is essential, not a nicety: the WAFs in
+			// front of Russian-market subscription endpoints
+			// (DDoS-Guard / Cloudflare / Qrator) answer the first
+			// request with a 302 that sets a clearance cookie and
+			// redirects back to the same URL, expecting that cookie
+			// echoed on the next hop. Without a jar the cookie is
+			// dropped, every hop re-issues the challenge, and the
+			// client loops until MaxRedirects — surfacing as the
+			// "stopped after 20 redirects" error. With the jar the
+			// second hop carries the cookie and the WAF lets it
+			// through. cookiejar.New(nil) never returns an error.
+			Jar: newCookieJar(),
 			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 				if len(via) >= MaxRedirects {
 					return fmt.Errorf("stopped after %d redirects", MaxRedirects)
@@ -76,6 +89,13 @@ func NewFetcher() *Fetcher {
 		},
 		UserAgent: DefaultUserAgent,
 	}
+}
+
+// newCookieJar returns an in-memory cookie jar. cookiejar.New(nil)
+// is documented to never return a non-nil error, so we drop it.
+func newCookieJar() http.CookieJar {
+	jar, _ := cookiejar.New(nil)
+	return jar
 }
 
 // Fetch makes the HTTP GET. ctx-aware. Returns the response body
@@ -100,6 +120,7 @@ func (f *Fetcher) Fetch(ctx context.Context, sub Subscription) (FetchResult, err
 			Timeout:       client.Timeout,
 			Transport:     tr,
 			CheckRedirect: client.CheckRedirect,
+			Jar:           client.Jar,
 		}
 	}
 

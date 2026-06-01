@@ -35,6 +35,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/singbox"
+	"github.com/knot-os/knot-os/core/internal/xray"
 	"github.com/knot-os/knot-os/core/internal/subscription"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 	"github.com/knot-os/knot-os/core/internal/wol"
@@ -632,6 +633,13 @@ func main() {
 	singboxRunner := netlinux.NewSingBoxRunner()
 	singboxMgr := singbox.NewManager(singboxRunner, logger)
 
+	// Xray supervisor. Runs alongside sing-box as a protocol upstream:
+	// servers sing-box can't speak (xhttp etc.) are hosted by Xray on
+	// loopback SOCKS ports that sing-box dials. Idle (process stopped)
+	// until the routing layer produces at least one Xray upstream.
+	xrayRunner := netlinux.NewXrayRunner()
+	xrayMgr := xray.NewManager(xrayRunner, logger)
+
 	// Routing diagnostics endpoint — UI pulls per-device decisions
 	// and the kill-switch list from this. Closes over the live
 	// registries; reads happen on every GET /api/routing.
@@ -1015,12 +1023,25 @@ func main() {
 					logger.Printf("routing: %d missing outbounds, kill-switching affected devices: %v",
 						len(res.MissingOutbounds), res.MissingOutbounds)
 				}
+				// Bring Xray up first so its loopback SOCKS upstreams
+				// are listening before sing-box starts dialing them.
+				if err := xrayMgr.Apply(ctx, res.XrayConfig); err != nil {
+					logger.Printf("xray: apply: %v", err)
+				}
 				if err := singboxMgr.Apply(ctx, res.Config); err != nil {
 					logger.Printf("singbox: apply: %v", err)
 				}
 			}
 		}
 	})
+
+	// Fire the apply chain once at boot so persisted state that lives
+	// outside backend.Apply — the WireGuard server and, crucially, the
+	// sing-box per-device routing — is reflected on the running system
+	// without waiting for the user to poke a setting. Without this a
+	// reboot leaves every tunneled device going direct until the next
+	// profile/subscription/config change re-triggers the callback.
+	apiSrv.FireConfigApplied()
 
 	if err := srv.Start(ctx); err != nil {
 		logger.Fatalf("server error: %v", err)

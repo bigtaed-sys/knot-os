@@ -153,39 +153,24 @@
 				</button>
 				<button
 					type="button"
-					onclick={() => (wizard.wanMode = 'pppoe')}
+					disabled
+					aria-disabled="true"
+					title={$_('setup.conn.pppoe_wip')}
 					class="
-						p-3 rounded-md border text-sm text-left
-						{wizard.wanMode === 'pppoe'
-							? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
-							: 'border-zinc-200 dark:border-zinc-700'}
+						relative p-3 rounded-md border text-sm text-left
+						border-zinc-200 dark:border-zinc-700 opacity-60 cursor-not-allowed
 					"
 				>
-					<div class="font-medium">PPPoE</div>
-					<div class="text-xs text-zinc-500 mt-0.5">{$_('setup.conn.pppoe_desc')}</div>
+					<div class="font-medium flex items-center gap-2">
+						PPPoE
+						<span class="badge text-[10px] bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
+							{$_('setup.conn.pppoe_wip_badge')}
+						</span>
+					</div>
+					<div class="text-xs text-zinc-500 mt-0.5">{$_('setup.conn.pppoe_wip')}</div>
 				</button>
 			</div>
 		</div>
-
-		{#if wizard.wanMode === 'pppoe'}
-			<div class="space-y-2 p-3 rounded-md bg-zinc-50 dark:bg-zinc-900/50">
-				<input
-					type="text"
-					bind:value={wizard.wanPppoeUser}
-					placeholder={$_('setup.conn.pppoe_user_ph')}
-					class="input"
-				/>
-				<input
-					type="password"
-					bind:value={wizard.wanPppoePass}
-					placeholder={$_('setup.conn.pppoe_pass_ph')}
-					class="input"
-				/>
-				<p class="text-xs text-zinc-500">
-					{$_('setup.conn.pppoe_help')}
-				</p>
-			</div>
-		{/if}
 	{:else}
 		<!-- Extender uplink scan -->
 		<div class="flex items-center justify-between mb-2">

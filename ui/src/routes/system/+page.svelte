@@ -21,6 +21,9 @@
 	let busy = $state<string | null>(null);
 	let updateMsg = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	let fileInput = $state<HTMLInputElement | null>(null);
+	let sigInput = $state<HTMLInputElement | null>(null);
+	let binFile = $state<File | null>(null);
+	let sigFile = $state<File | null>(null);
 
 	// GitHub auto-update state.
 	let upd = $state<UpdateCheckResult | null>(null);
@@ -341,29 +344,59 @@
 		}
 	}
 
-	async function uploadUpdate(e: Event) {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (!file) return;
+	function pickBinary(e: Event) {
+		binFile = (e.target as HTMLInputElement).files?.[0] ?? null;
+		updateMsg = null;
+	}
+
+	function pickSignature(e: Event) {
+		sigFile = (e.target as HTMLInputElement).files?.[0] ?? null;
+		updateMsg = null;
+	}
+
+	// uploadUpdate posts the chosen knotd binary to /system/update.
+	// When a detached signature (.sig) is also selected it switches to
+	// a multipart/form-data body with `binary` + `signature` parts —
+	// the shape the daemon requires on production-keyed builds. Without
+	// a signature it falls back to the raw octet-stream upload, which
+	// only dev-key-empty builds accept.
+	async function uploadUpdate() {
+		if (!binFile) return;
 		busy = 'update';
 		updateMsg = null;
 		try {
-			const res = await fetch(`${API_BASE}/system/update`, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'content-type': 'application/octet-stream' },
-				body: file
-			});
+			let res: Response;
+			if (sigFile) {
+				const form = new FormData();
+				form.append('binary', binFile, 'knotd');
+				form.append('signature', sigFile, 'knotd.sig');
+				res = await fetch(`${API_BASE}/system/update`, {
+					method: 'POST',
+					credentials: 'same-origin',
+					body: form
+				});
+			} else {
+				res = await fetch(`${API_BASE}/system/update`, {
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'content-type': 'application/octet-stream' },
+					body: binFile
+				});
+			}
 			if (!res.ok) {
 				const body = await res.json().catch(() => null);
 				throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
 			}
 			updateMsg = { kind: 'ok', text: $_('system.update_success') };
+			binFile = null;
+			sigFile = null;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			updateMsg = { kind: 'err', text: $_('system.update_error', { values: { message: msg } }) };
 		} finally {
 			busy = null;
 			if (fileInput) fileInput.value = '';
+			if (sigInput) sigInput.value = '';
 		}
 	}
 
@@ -770,22 +803,42 @@
 				bind:this={fileInput}
 				type="file"
 				accept=""
-				onchange={uploadUpdate}
+				onchange={pickBinary}
 				class="hidden"
 			/>
-			<button
-				class="btn-ghost"
-				disabled={busy === 'update'}
-				onclick={() => fileInput?.click()}
-			>
-				{#if busy === 'update'}
-					<span class="spinner"></span>
-					{$_('system.update_uploading')}
-				{:else}
-					<i class="bi bi-upload"></i>
-					{$_('system.update_choose')}
-				{/if}
-			</button>
+			<input
+				bind:this={sigInput}
+				type="file"
+				accept=".sig"
+				onchange={pickSignature}
+				class="hidden"
+			/>
+			<div class="flex flex-wrap items-center gap-2">
+				<button class="btn-ghost" disabled={busy === 'update'} onclick={() => fileInput?.click()}>
+					<i class="bi bi-file-earmark-binary"></i>
+					{binFile ? binFile.name : $_('system.update_choose')}
+				</button>
+				<button class="btn-ghost" disabled={busy === 'update'} onclick={() => sigInput?.click()}>
+					<i class="bi bi-file-earmark-lock"></i>
+					{sigFile ? sigFile.name : $_('system.update_choose_sig')}
+				</button>
+				<button
+					class="btn-primary"
+					disabled={!binFile || busy === 'update'}
+					onclick={uploadUpdate}
+				>
+					{#if busy === 'update'}
+						<span class="spinner"></span>
+						{$_('system.update_uploading')}
+					{:else}
+						<i class="bi bi-upload"></i>
+						{$_('system.update_install')}
+					{/if}
+				</button>
+			</div>
+			<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-2">
+				{$_('system.update_sig_hint')}
+			</p>
 		</details>
 
 		{#if updateMsg}

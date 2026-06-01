@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
@@ -22,6 +23,7 @@ func (s *Server) MountSetup(r chi.Router) {
 		r.Use(s.requireSetupRole)
 		r.Get("/scan", s.handleSetupScan)
 		r.Get("/capability", s.handleSetupCapability)
+		r.Get("/qr", s.handleSetupQR)
 		r.Post("/complete", s.handleSetupComplete)
 	})
 }
@@ -94,6 +96,37 @@ func (s *Server) requireSetupRole(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleSetupQR renders the `text` query parameter as a PNG QR code.
+// The wizard's Wi-Fi step points an <img> at this endpoint with the
+// `WIFI:T:WPA;S:...;P:...;H:false;` join string so the user (or a
+// guest) can scan the about-to-be-created network straight off the
+// onboarding screen. Encoding server-side reuses the same go-qrcode
+// dependency the WireGuard peer QR already pulls in, so the UI bundle
+// stays dependency-free.
+//
+// The text is the user's own credentials echoed back as an image; we
+// cap the length purely to bound the encoder's work.
+func (s *Server) handleSetupQR(w http.ResponseWriter, r *http.Request) {
+	text := r.URL.Query().Get("text")
+	if text == "" {
+		writeError(w, http.StatusBadRequest, "missing_text", "text query parameter is required")
+		return
+	}
+	if len(text) > 512 {
+		writeError(w, http.StatusRequestEntityTooLarge, "text_too_long", "text exceeds 512 bytes")
+		return
+	}
+	png, err := qrcode.Encode(text, qrcode.Medium, 256)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "qr_failed", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(png)
 }
 
 func (s *Server) handleSetupScan(w http.ResponseWriter, r *http.Request) {

@@ -85,6 +85,12 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kick()
+	// A profile's RouteVia (the tunnel assignment) is read by the
+	// routing renderer, not the scheduler — so kicking the scheduler
+	// alone leaves sing-box untouched and the device keeps going
+	// direct. Fire the config-applied chain so routing is rebuilt and
+	// sing-box reloaded with the new per-device source-IP rules.
+	s.fireConfigApplied(s.Snapshot())
 
 	out, _ := s.profiles.Get(id)
 	writeJSON(w, http.StatusOK, out)
@@ -101,5 +107,8 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kick()
+	// Deleting a profile can orphan devices that routed through it —
+	// rebuild routing so their rules drop back to direct.
+	s.fireConfigApplied(s.Snapshot())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

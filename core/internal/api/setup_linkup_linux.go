@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/knot-os/knot-os/core/internal/network/capability"
 )
 
 // bringUSBEthUp brings every USB-attached Ethernet interface admin-UP
@@ -28,27 +30,25 @@ import (
 // for that on production to see what was tried + what came back.
 func bringUSBEthUp() {
 	const sysClassNet = "/sys/class/net"
-	entries, err := os.ReadDir(sysClassNet)
+
+	// Reuse the capability probe's adapter detection so linkup and the
+	// downstream `setup/capability` read never disagree about what
+	// counts as a USB-Ethernet adapter. The probe accepts an adapter on
+	// EITHER a "usb" path segment OR a uevent PRODUCT= line; checking
+	// only the readlink target (as this function used to) misses the
+	// common case where /sys/class/net/<iface>/device resolves to a
+	// relative target like "../../../1-1.1:1.0" with no "usb" substring
+	// — e.g. an RTL8152 on a Zero 2W. That divergence left the cable
+	// admin-down, carrier reading 0, and the wizard reporting "no cable"
+	// on hardware that the capability endpoint happily saw.
+	rep, err := capability.Probe{SysClassNet: sysClassNet}.Run()
 	if err != nil {
-		log.Printf("setup/linkup: cannot read %s: %v", sysClassNet, err)
+		log.Printf("setup/linkup: capability probe: %v", err)
 		return
 	}
 	candidates := []string{}
-	for _, e := range entries {
-		name := e.Name()
-		if name == "lo" || strings.HasPrefix(name, "wlan") ||
-			strings.HasPrefix(name, "ap") || strings.HasPrefix(name, "br") {
-			continue
-		}
-		dev := filepath.Join(sysClassNet, name, "device")
-		resolved, err := os.Readlink(dev)
-		if err != nil {
-			continue
-		}
-		if !strings.Contains(resolved, "usb") {
-			continue
-		}
-		candidates = append(candidates, name)
+	for _, a := range rep.Eth {
+		candidates = append(candidates, a.Interface)
 	}
 	if len(candidates) == 0 {
 		log.Printf("setup/linkup: no USB-Ethernet candidates in /sys/class/net")

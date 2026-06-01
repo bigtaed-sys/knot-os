@@ -5,7 +5,22 @@ import (
 	"strings"
 
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/singbox"
 )
+
+// tunForwardRules returns the nftables forward-chain lines that let
+// LAN clients' traffic pass to and from the sing-box TUN interface.
+// Without these, a device routed into the tunnel is dropped by the
+// forward chain's `policy drop` (its packets go LAN → knotvpn0, which
+// matches none of the LAN↔WAN accept rules). The interface need not
+// exist for the rule to load — when sing-box is stopped, nothing has
+// oifname knotvpn0 and the rules simply never match.
+func tunForwardRules(lanIface string) string {
+	return fmt.Sprintf(`
+        iifname "%[1]s" oifname "%[2]s" accept;
+        iifname "%[2]s" oifname "%[1]s" accept;`,
+		lanIface, singbox.TUNInterfaceName)
+}
 
 // SetupSSIDPrefix is prepended to the last 4 hex chars of the device's
 // MAC to form the open onboarding SSID, e.g. "KnotOS-setup-A1B2".
@@ -247,7 +262,7 @@ table inet knot {
         type filter hook forward priority filter; policy drop;
         ether saddr @blocked_macs drop;
         iifname "%[2]s" oifname "%[1]s" accept;
-        iifname "%[1]s" oifname "%[2]s" ct state established,related accept;
+        iifname "%[1]s" oifname "%[2]s" ct state established,related accept;%[4]s
     }
 }
 
@@ -257,7 +272,7 @@ table ip knot_nat {
         ip saddr %[3]s oifname "%[1]s" masquerade;
     }
 }
-`, p.WANInterface, p.LANInterface, p.LANCIDR)
+`, p.WANInterface, p.LANInterface, p.LANCIDR, tunForwardRules(p.LANInterface))
 }
 
 // RouterNftablesParams is the input for BuildNftablesRouter. The
@@ -357,7 +372,7 @@ table inet knot {
         type filter hook forward priority filter; policy drop;
         ether saddr @blocked_macs drop;%[6]s
         iifname "%[2]s" oifname "%[1]s" accept;
-        iifname "%[1]s" oifname "%[2]s" ct state established,related accept;%[4]s
+        iifname "%[1]s" oifname "%[2]s" ct state established,related accept;%[4]s%[8]s
     }
 }
 
@@ -367,7 +382,7 @@ table ip knot_nat {
         ip saddr %[3]s oifname "%[1]s" masquerade;
 %[5]s%[7]s    }
 }
-`, p.WANInterface, p.LANInterface, p.LANCIDR, vpnFwd, vpnNat, guestFwd, guestNat)
+`, p.WANInterface, p.LANInterface, p.LANCIDR, vpnFwd, vpnNat, guestFwd, guestNat, tunForwardRules(p.LANInterface))
 }
 
 // CaptivePortalParams is the input for BuildNftablesCaptive.
