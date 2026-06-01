@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -248,6 +249,7 @@ func main() {
 		seedPath      = flag.String("secrets-seed", secrets.DefaultSeedPath, "path to the random seed used to derive the at-rest encryption key")
 		machineIDPath = flag.String("secrets-machine-id", secrets.DefaultMachineIDPath, "path to /etc/machine-id (mixed into the encryption key); empty to skip")
 		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
+		updateRepo    = flag.String("update-repo", "bigtaed-sys/knot-os", "GitHub <owner>/<name> to query for self-update releases")
 	)
 	flag.Parse()
 
@@ -566,8 +568,20 @@ func main() {
 			rescuePub = rescue.PublicKey()
 		}
 
+		// Self-update source. Defaults to the project's release repo;
+		// override with -update-repo for a fork. A malformed value
+		// falls back to the update package's own default rather than
+		// disabling updates outright.
+		repoOwner, repoName := "", ""
+		if o, n, ok := strings.Cut(*updateRepo, "/"); ok {
+			repoOwner, repoName = o, n
+		} else {
+			logger.Printf("update: -update-repo %q is not <owner>/<name>; using package default", *updateRepo)
+		}
 		updater, err := update.New(update.Options{
 			CurrentVersion: Version,
+			RepoOwner:      repoOwner,
+			RepoName:       repoName,
 			Logger:         logger,
 		})
 		if err != nil {

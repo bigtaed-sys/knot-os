@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.2] — 2026-06-02
+
+### Fixed
+
+- **Self-update checked a repo that doesn't exist.** The update manager defaulted to `knot-os/knot-os` (the Go module path, not a real GitHub repo), so "Check for updates" always failed with "could not reach GitHub" even with a healthy connection. The release repo is now configurable via `-update-repo` (default `bigtaed-sys/knot-os`). Install this build once manually; subsequent updates work from the System page.
+
 ## [2026.06.1] — 2026-06-02
 
 Theme: **"Two engines, one tunnel — and it actually routes"**. The per-device VPN path is now reliable end-to-end on real hardware, gains a second proxy engine for the transports sing-box won't speak, and the setup wizard / subscription flow shed a string of first-boot papercuts.
