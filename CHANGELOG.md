@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.3] — 2026-06-02
+
+### Fixed
+
+- **Flashed devices didn't trust official releases.** `image/build.sh` never injected the release public key, so an image-built daemon trusted only its per-device rescue key and would reject every GitHub auto-update at the signature check (even after the repo fix). The release public key is now committed as the default in `update/keys.go` (it's public — safe to ship), so every build — image, local, and CI — verifies official releases. Install this build once with a rescue-signed binary; from then on GitHub auto-update works end to end.
+
 ## [2026.06.2] — 2026-06-02
 
 ### Fixed

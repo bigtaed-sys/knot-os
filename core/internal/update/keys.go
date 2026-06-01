@@ -12,11 +12,20 @@ package update
 // binary. Devices running an official build verify against this
 // value at update time.
 //
-// When the constant is empty (a developer's local `go build`),
-// signature verification is skipped with a loud warning. That keeps
-// development frictionless without quietly disabling security in
-// shipped images — official builds always set the flag.
-var releaseKeyHex = ""
+// This is the PUBLIC half of the release key — safe to commit. Baking
+// it in as the default (rather than leaving it empty and relying on
+// the -ldflags injection only in the release CI) means every build —
+// the flashed image included — trusts official releases. Without it,
+// a device built by image/build.sh (which does not inject the key)
+// would refuse every GitHub auto-update, since it would trust only the
+// per-device rescue key. The release CI still passes the same value
+// via -ldflags; that override is a no-op now but keeps the pipeline's
+// "key is present" sanity check meaningful.
+//
+// When the constant is empty (e.g. a fork that stripped it), signature
+// verification falls back to the rescue key alone, or is skipped with a
+// loud warning if neither key is configured.
+var releaseKeyHex = "f470c961fc95a9431c0497069cc08e70672756b394195de8da505084170e1f1c"
 
 // rescueKeyHex is the hex-encoded Ed25519 public half of an
 // optional second authorising key. Set per-device on first run

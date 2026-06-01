@@ -124,7 +124,11 @@ func TestVerifySkipsWhenNoKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Both keys are nil → permissive dev mode.
+	// Simulate a build with no keys at all (the baked-in release
+	// public key is now the default, so clear it explicitly): both
+	// keys nil → permissive dev mode.
+	m.publicKey = nil
+	m.rescueKey = nil
 	if err := m.VerifyAndInstall(elfStub(), []byte("garbage")); err != nil {
 		t.Errorf("dev mode should accept any signature, got %v", err)
 	}
