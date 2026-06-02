@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.13-1] — 2026-06-02
+
+### Fixed
+
+- **Blocked-device landing page never appeared** — the plain-HTTP listener's HTTPS 301 ran *before* the landing check, so a blocked device's captive probe got redirected to a cert it couldn't validate ("can't reach the site") instead of the page. The landing now serves on plain HTTP before any redirect, so captive detection pops it up. (First patch-numbered release — small fixes ship as `-N` now.)
+
 ## [2026.06.13] — 2026-06-02
 
 ### Blocked-device landing page

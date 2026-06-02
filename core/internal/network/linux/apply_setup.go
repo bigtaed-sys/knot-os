@@ -151,13 +151,28 @@ func (b *LinuxBackend) applyNftables(ctx context.Context, ruleset string) error 
 // writeRuntimeFile writes content to path with mode 0o644, creating
 // parent directories as needed.
 func writeRuntimeFile(path, content string) error {
+	_, err := writeRuntimeFileChanged(path, content)
+	return err
+}
+
+// writeRuntimeFileChanged writes content to path and reports whether
+// it differed from what was already there. Callers use the "changed"
+// signal to avoid bouncing a daemon (notably hostapd) when its config
+// is byte-identical — a needless AP restart drops every Wi-Fi client,
+// and phones with rotating private MACs reconnect under a fresh MAC,
+// littering the device list with duplicates after, say, a knotd
+// update that re-applies an unchanged config.
+func writeRuntimeFileChanged(path, content string) (bool, error) {
 	if err := os.MkdirAll(RuntimeDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", RuntimeDir, err)
+		return false, fmt.Errorf("mkdir %s: %w", RuntimeDir, err)
+	}
+	if old, err := os.ReadFile(path); err == nil && string(old) == content {
+		return false, nil
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return false, fmt.Errorf("write %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }
 
 // firstUsableIP returns the first usable host address in the CIDR

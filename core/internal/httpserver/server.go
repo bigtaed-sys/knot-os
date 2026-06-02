@@ -88,16 +88,13 @@ func New(opts Options) *Server {
 	// Blocked-device landing: a paused / awaiting-approval device's DNS
 	// is captive-redirected here, so serve it the explanatory page for
 	// any path. Exempts the public allowlist (healthz / CA download).
+	// (The plain-HTTP listener also checks this *before* its HTTPS
+	// redirect — see httpHandler — so captive detection, which probes
+	// plain HTTP, gets the page instead of a 301.)
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if s.blockedPageFn != nil && !plaintextAllowed(req.URL.Path) {
-				if page, blocked := s.blockedPageFn(clientIP(req)); blocked {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.Header().Set("Cache-Control", "no-store")
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write(page)
-					return
-				}
+			if s.maybeServeBlocked(w, req) {
+				return
 			}
 			next.ServeHTTP(w, req)
 		})
@@ -168,6 +165,13 @@ func (s *Server) Mount(pattern string, handler http.Handler) {
 // served (used in setup role and dev mode).
 func (s *Server) httpHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A blocked device must get the landing page on plain HTTP —
+		// BEFORE the HTTPS redirect — or its captive-detection probe
+		// (which is plain HTTP) just sees a 301 to a cert it can't
+		// validate, and the page never appears.
+		if s.maybeServeBlocked(w, r) {
+			return
+		}
 		if s.redirectHTTPS.Load() && !plaintextAllowed(r.URL.Path) {
 			target := "https://" + redirectHost(r) + r.URL.RequestURI()
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
@@ -175,6 +179,24 @@ func (s *Server) httpHandler() http.Handler {
 		}
 		s.router.ServeHTTP(w, r)
 	})
+}
+
+// maybeServeBlocked writes the blocked-device landing page and returns
+// true when the client is currently denied the internet (and the
+// landing is enabled). Used on both listeners.
+func (s *Server) maybeServeBlocked(w http.ResponseWriter, r *http.Request) bool {
+	if s.blockedPageFn == nil || plaintextAllowed(r.URL.Path) {
+		return false
+	}
+	page, blocked := s.blockedPageFn(clientIP(r))
+	if !blocked {
+		return false
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(page)
+	return true
 }
 
 // clientIP returns the request's source IP without the port. With
