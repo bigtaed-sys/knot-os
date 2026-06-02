@@ -8,8 +8,8 @@
 		"devices": "Devices",
 		"profiles": "Profiles",
 		"protection": "Protection",
-		"vpn": "VPN",
-		"routing": "Routing",
+		"vpn": "WireGuard server",
+		"routing": "VPN",
 		"guests": "Guests",
 		"network": "Network",
 		"plugins": "Plugins",
@@ -441,7 +441,7 @@
 		"error_already_revealed": "Private key was already revealed earlier."
 	},
 	"vpn": {
-		"title": "VPN server",
+		"title": "WireGuard server",
 		"subtitle": "WireGuard road-warrior — reach your home LAN from anywhere by scanning a QR. Per-peer profiles work the same as on the LAN: ad-block + schedules travel with you.",
 		"server_section": "Server",
 		"peers_section": "Peers",
@@ -536,7 +536,7 @@
 		"already_optimal": "Already on the optimal channel per the latest scan."
 	},
 	"routing": {
-		"title": "Routing",
+		"title": "VPN",
 		"subtitle": "Send each device through any VPN server you've subscribed to — like Happ, but for your whole LAN. Paste a subscription URL or a single vless:// share link, and assign servers to profiles.",
 		"add_subscription": "Add subscription",
 		"add_uri": "Paste share link",
