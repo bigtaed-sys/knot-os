@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.13-2] — 2026-06-02
+
+### Fixed
+
+- **Devices no longer double up when a phone rotates its private MAC.** A phone with a rotating randomized Wi-Fi address used to appear as a new device on every reconnect (e.g. after a knotd update or reboot), leaving ghosts in the list. The registry now recognizes locally-administered (private) MACs and, when one reappears under a new MAC with the same DHCP hostname while the old entry is offline, **carries the device's name, profile, pause, and approval forward** and drops the old entry — so it stays one device. Anonymous, uncustomized rotation ghosts that are offline for over 6 hours are also pruned hourly. Configured devices are never auto-removed.
+
 ## [2026.06.13-1] — 2026-06-02
 
 ### Fixed

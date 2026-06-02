@@ -294,6 +294,13 @@ func (r *Registry) RefreshFromLeases() error {
 			}
 			r.devices[e.MAC] = d
 			changed = true
+			// A phone that rotated its private MAC shows up as a brand
+			// new device. If this is a randomized MAC whose hostname
+			// matches an existing *offline* randomized entry, that's
+			// almost certainly the same device under its previous MAC —
+			// carry its name/profile/pause/approval forward and drop
+			// the ghost, so the list shows one device, not two.
+			r.carryForwardRotatedLocked(d, e.Hostname, now)
 		}
 		if d.IP != e.IP || d.Hostname != e.Hostname {
 			d.IP = e.IP
@@ -418,6 +425,99 @@ type storeDoc struct {
 	QuarantineNewDevices bool     `yaml:"quarantine_new_devices,omitempty"`
 	BlockLandingPage     bool     `yaml:"block_landing_page,omitempty"`
 	Devices              []Device `yaml:"devices"`
+}
+
+// IsRandomizedMAC reports whether mac is a locally-administered
+// ("private" / randomized) address — the kind phones generate per
+// network and may rotate. Detected via the locally-administered bit
+// (0x02) of the first octet. The registry treats such MACs specially:
+// identity carry-forward on rotation + pruning of anonymous ghosts.
+func IsRandomizedMAC(mac string) bool {
+	mac = normalizeMAC(mac)
+	if mac == "" {
+		return false
+	}
+	hi, lo := hexNibble(mac[0]), hexNibble(mac[1])
+	if hi < 0 || lo < 0 {
+		return false
+	}
+	return (hi<<4|lo)&0x02 != 0
+}
+
+func hexNibble(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
+// carryForwardRotatedLocked moves a rotated phone's identity onto its
+// new MAC. Caller holds r.mu. newDev was just created for a randomized
+// MAC; if an existing *offline* randomized device advertised the same
+// (non-empty) hostname, inherit the user-set fields from it and delete
+// it. The offline guard avoids merging two genuinely different devices
+// that happen to share a hostname while both are connected.
+func (r *Registry) carryForwardRotatedLocked(newDev *Device, hostname string, now time.Time) {
+	if hostname == "" || hostname == "*" || !IsRandomizedMAC(newDev.MAC) {
+		return
+	}
+	for mac, old := range r.devices {
+		if mac == newDev.MAC || old.Hostname != hostname || !IsRandomizedMAC(mac) {
+			continue
+		}
+		if old.Online(now) {
+			continue // both present → different devices, don't merge
+		}
+		if newDev.DisplayName == "" {
+			newDev.DisplayName = old.DisplayName
+		}
+		if newDev.ProfileID == "" {
+			newDev.ProfileID = old.ProfileID
+		}
+		newDev.PauseUntil = old.PauseUntil
+		// A rotated-but-already-approved phone must not get re-quarantined.
+		newDev.Approved = newDev.Approved || old.Approved
+		if !old.FirstSeen.IsZero() && old.FirstSeen.Before(newDev.FirstSeen) {
+			newDev.FirstSeen = old.FirstSeen
+		}
+		delete(r.devices, mac)
+		return
+	}
+}
+
+// PruneStaleRandomized forgets randomized-MAC devices that are offline,
+// older than maxAge, AND carry no user customization (no name, no
+// profile, not paused) — i.e. anonymous rotation ghosts. Configured
+// devices are never auto-pruned; they age out via the normal Stale
+// path / manual Forget. Returns how many were removed.
+func (r *Registry) PruneStaleRandomized(now time.Time, maxAge time.Duration) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for mac, d := range r.devices {
+		if !IsRandomizedMAC(mac) || d.Online(now) {
+			continue
+		}
+		if d.DisplayName != "" || d.ProfileID != "" || d.Paused(now) {
+			continue // user touched it — keep
+		}
+		last := d.LastSeen
+		if last.IsZero() {
+			last = d.FirstSeen
+		}
+		if last.IsZero() || now.Sub(last) <= maxAge {
+			continue
+		}
+		delete(r.devices, mac)
+		r.dirty = true
+		n++
+	}
+	return n
 }
 
 // normalizeMAC lower-cases and validates a MAC. Returns empty string

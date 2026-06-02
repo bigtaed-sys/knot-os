@@ -444,6 +444,27 @@ func main() {
 	devices.StartARPWatcher(ctx)
 	logger.Printf("device registry: %d known", len(devices.List()))
 
+	// Hourly sweep of anonymous rotation ghosts: phones with rotating
+	// private MACs leave a trail of offline single-use entries. Carry-
+	// forward (in RefreshFromLeases) collapses ones with a matching
+	// hostname; this prunes the rest (offline, randomized, uncustomized,
+	// older than 6h) so the device list doesn't accumulate clutter.
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-t.C:
+				if n := devices.PruneStaleRandomized(now, 6*time.Hour); n > 0 {
+					_ = devices.FlushIfDirty()
+					logger.Printf("device registry: pruned %d stale randomized-MAC ghost(s)", n)
+				}
+			}
+		}
+	}()
+
 	// Profile registry: built-in + user profiles, persisted to YAML.
 	profiles := profile.NewRegistry("/etc/knot/profiles.yaml")
 	if err := profiles.Load(); err != nil {
