@@ -12,9 +12,11 @@
 
 	let {
 		plugins = [],
+		version = '',
 		open = $bindable(false)
 	}: {
 		plugins?: Plugin[];
+		version?: string;
 		open?: boolean;
 	} = $props();
 
@@ -125,7 +127,7 @@
 
 		<!-- Footer: version + project link -->
 		<div class="p-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 dark:text-zinc-400">
-			<div>v0.1.0-dev</div>
+			<div>{version ? 'v' + version : ''}</div>
 		</div>
 	</div>
 </aside>
