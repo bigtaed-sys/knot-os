@@ -251,7 +251,7 @@ func main() {
 		machineIDPath = flag.String("secrets-machine-id", secrets.DefaultMachineIDPath, "path to /etc/machine-id (mixed into the encryption key); empty to skip")
 		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 		updateRepo    = flag.String("update-repo", "bigtaed-sys/knot-os", "GitHub <owner>/<name> to query for self-update releases")
-		pluginsIndex  = flag.String("plugins-index", "https://raw.githubusercontent.com/bigtaed-sys/knot-os/main/plugins/store.json", "URL of the plugin store catalog (JSON index)")
+		pluginsIndex  = flag.String("plugins-index", "https://raw.githubusercontent.com/bigtaed-sys/knot-os-plugins/main/store.json", "URL of the plugin store catalog (JSON index)")
 	)
 	flag.Parse()
 

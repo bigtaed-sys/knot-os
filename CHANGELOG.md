@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.8] — 2026-06-02
+
+### Changed
+
+- **Plugin store catalog moved to its own repo.** The store index now lives in the dedicated [bigtaed-sys/knot-os-plugins](https://github.com/bigtaed-sys/knot-os-plugins) repo (`store.json`) instead of inside the firmware tree, so the catalog can grow and accept third-party submissions independently of firmware releases. knotd's default `-plugins-index` points there; first-party packages are still built/signed by the firmware release pipeline and referenced from the catalog.
+
 ## [2026.06.7] — 2026-06-02
 
 Theme: **"Plugin store"**. Browse and install plugins from a GitHub-hosted catalog — first-party packages verify automatically, third-party ones install only with explicit confirmation.

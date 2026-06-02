@@ -95,6 +95,16 @@ subscribes once and reacts (see the reference plugin's live feed).
 More endpoints and write scopes are added as the contract grows; the
 permission model means a plugin only ever reaches what it asked for.
 
+## Store
+
+The installable catalog lives in a dedicated repo,
+[bigtaed-sys/knot-os-plugins](https://github.com/bigtaed-sys/knot-os-plugins)
+(`store.json`). knotd fetches it by default; override with
+`knotd -plugins-index <url>`. A package signed by the firmware release
+key installs as **official**; anything else needs explicit operator
+confirmation. See that repo's README for the catalog format and how to
+submit a plugin.
+
 ## Reference
 
 `plugins/example-hello/` is a complete, dependency-free Go plugin: it
