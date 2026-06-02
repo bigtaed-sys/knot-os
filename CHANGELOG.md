@@ -4,6 +4,13 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.4] — 2026-06-02
+
+Verification release — no functional changes. Cut to confirm the GitHub
+auto-update path (check → download → verify → install → restart) works
+end to end from the System page. The only observable difference is the
+version string bumping from 2026.06.3.
+
 ## [2026.06.3] — 2026-06-02
 
 ### Fixed
