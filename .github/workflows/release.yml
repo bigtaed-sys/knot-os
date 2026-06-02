@@ -88,12 +88,13 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
-          GOWORK: 'off'
           RELEASE_PRIVATE_KEY: ${{ secrets.RELEASE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           pdir=plugins/example-hello
-          ( cd "$pdir" && go build -trimpath -ldflags '-s -w' -o example-hello . )
+          # GOWORK=off only for the plugin (a standalone module outside
+          # the workspace); knot-sign below builds with the workspace.
+          ( cd "$pdir" && GOWORK=off go build -trimpath -ldflags '-s -w' -o example-hello . )
           # Package the manifest + binary at the zip root (matches the
           # plugin store contract). Built in a clean staging dir so no
           # stray files (go.mod, *.go) get bundled.
