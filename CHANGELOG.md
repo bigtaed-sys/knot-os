@@ -4,6 +4,18 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.7] — 2026-06-02
+
+Theme: **"Plugin store"**. Browse and install plugins from a GitHub-hosted catalog — first-party packages verify automatically, third-party ones install only with explicit confirmation.
+
+### Plugin store (M3)
+
+- **Catalog from GitHub.** `GET /api/plugins/store` fetches a JSON index (`plugins/store.json`, default served from the project repo) and the Plugins page renders it with Install buttons and official / third-party badges.
+- **Signed install, hardened.** `POST /api/plugins/install` downloads the zip package, verifies an optional detached Ed25519 signature against the release key (the same trust anchor as auto-update), and unpacks it — with zip-slip protection (no path traversal, no symlinks/absolute paths), size caps, and an atomic swap into place. A package signed by the release key is **official** and installs directly.
+- **Third-party = explicit confirmation.** An unsigned / untrusted package returns `409 needs_confirmation`; the UI shows a clear "runs as a process on your router" warning and only proceeds when the operator confirms. Trust is decided by signature at install time, never by a catalog flag.
+- **Uninstall.** `DELETE /api/plugins/{id}` stops the process and removes the directory.
+- **Release pipeline** now builds, zips, and signs the reference plugin (`example-hello-linux-arm64.zip` + `.sig`) and the store catalog points at the release's `latest` assets, so the store works end to end out of the box.
+
 ## [2026.06.6] — 2026-06-02
 
 Theme: **"Plugins that actually run"**. The plugin system graduates from metadata-only scaffolding to a real runtime.

@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -32,6 +34,11 @@ func (s *Server) MountPlugins(r chi.Router) {
 
 	r.Get("/plugins", s.handleListPlugins)
 	r.Put("/plugins/{id}", s.handleSetPluginEnabled)
+	// Plugin store: browse a GitHub-hosted catalog, install (signed →
+	// trusted; otherwise explicit confirmation), and uninstall.
+	r.Get("/plugins/store", s.handlePluginStore)
+	r.Post("/plugins/install", s.handlePluginInstall)
+	r.Delete("/plugins/{id}", s.handlePluginUninstall)
 	// Reverse-proxy a running plugin's own HTTP server (its UI + API).
 	// All methods; the wildcard carries the sub-path. Auth-gated like
 	// the rest of /api, so only logged-in operators reach plugin UIs.
@@ -155,6 +162,130 @@ func (s *Server) SetPluginRegistry(p *plugin.Registry) {
 // plugin processes with the registry's enabled set (main wires it to
 // supervisor.Sync). Fired after a plugin is toggled.
 func (s *Server) SetPluginSyncFn(fn func()) { s.pluginSync = fn }
+
+// SetPluginStore wires the store: an installer (download/verify/unpack)
+// and the catalog index URL. Pass a nil installer to leave the store
+// endpoints 503.
+func (s *Server) SetPluginStore(in *plugin.Installer, indexURL string) {
+	s.pluginInstaller = in
+	s.pluginIndexURL = indexURL
+}
+
+// handlePluginStore fetches the catalog and marks which entries are
+// already installed so the UI can show Install vs Installed.
+func (s *Server) handlePluginStore(w http.ResponseWriter, r *http.Request) {
+	if s.pluginIndexURL == "" {
+		writeError(w, http.StatusServiceUnavailable, "store_disabled", "plugin store not configured")
+		return
+	}
+	cat, err := plugin.FetchCatalog(r.Context(), &http.Client{Timeout: 15 * time.Second}, s.pluginIndexURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "store_unreachable", err.Error())
+		return
+	}
+	type entry struct {
+		plugin.CatalogEntry
+		Installed bool `json:"installed"`
+	}
+	out := make([]entry, 0, len(cat.Plugins))
+	for _, e := range cat.Plugins {
+		_, installed := s.plugins.Get(e.ID)
+		out = append(out, entry{CatalogEntry: e, Installed: installed})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plugins": out})
+}
+
+// handlePluginInstall downloads + verifies + unpacks a package. An
+// untrusted (unsigned / not-our-key) package returns 409 with
+// needs_confirmation:true; the UI then re-POSTs with confirm:true
+// after the operator acknowledges running third-party code.
+func (s *Server) handlePluginInstall(w http.ResponseWriter, r *http.Request) {
+	if s.pluginInstaller == nil {
+		writeError(w, http.StatusServiceUnavailable, "store_disabled", "plugin installer not configured")
+		return
+	}
+	var body struct {
+		URL     string `json:"url"`
+		SigURL  string `json:"sig_url"`
+		Confirm bool   `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	res, err := s.pluginInstaller.Install(r.Context(), plugin.InstallRequest{
+		URL: body.URL, SigURL: body.SigURL, Confirm: body.Confirm,
+	})
+	if err != nil {
+		if errors.Is(err, plugin.ErrConfirmationRequired) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": map[string]any{
+					"code":    "confirmation_required",
+					"message": "this package is not signed by a trusted key — confirm to install third-party code",
+				},
+				"needs_confirmation": true,
+			})
+			return
+		}
+		writeError(w, http.StatusUnprocessableEntity, "install_failed", err.Error())
+		return
+	}
+
+	// Pick up the freshly-installed plugin (starts disabled) and
+	// reconcile processes.
+	if err := s.plugins.Discover(); err != nil {
+		// Non-fatal: the install landed; bad siblings are just skipped.
+		_ = err
+	}
+	if s.pluginSync != nil {
+		s.pluginSync()
+	}
+	p, _ := s.plugins.Get(res.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installed": res.ID,
+		"trusted":   res.Trusted,
+		"plugin":    p,
+	})
+}
+
+// handlePluginUninstall stops the plugin, removes its directory, and
+// re-discovers so it drops off the list.
+func (s *Server) handlePluginUninstall(w http.ResponseWriter, r *http.Request) {
+	if s.pluginInstaller == nil {
+		writeError(w, http.StatusServiceUnavailable, "store_disabled", "plugin installer not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if _, ok := s.plugins.Get(id); !ok {
+		writeError(w, http.StatusNotFound, "plugin_not_found", "no such plugin: "+id)
+		return
+	}
+	// Disable first so the supervisor stops the process, then remove.
+	s.plugins.SetEnabled(id, false)
+	if s.pluginSync != nil {
+		s.pluginSync()
+	}
+	if err := s.pluginInstaller.Uninstall(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "uninstall_failed", err.Error())
+		return
+	}
+	if err := s.plugins.Discover(); err != nil {
+		_ = err
+	}
+	// Persist the now-smaller enabled set.
+	s.mu.Lock()
+	cfg := s.cfg
+	enabledMap := s.plugins.EnabledMap()
+	cfg.Plugins = make(map[string]config.PluginConfig, len(enabledMap))
+	for pid := range enabledMap {
+		cfg.Plugins[pid] = config.PluginConfig{Enabled: true}
+	}
+	s.cfg = cfg
+	s.mu.Unlock()
+	_ = config.SaveWith(s.configPath, cfg, s.sealer)
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "uninstalled": id})
+}
 
 // pluginJSON is a Plugin enriched with its live process state for the
 // /api/plugins list, so the UI can show running / crashed badges.

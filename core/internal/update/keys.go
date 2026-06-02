@@ -1,5 +1,20 @@
 package update
 
+import "crypto/ed25519"
+
+// ReleasePublicKey returns the embedded release public key (the same
+// key auto-update verifies against), or nil if none is baked in. The
+// plugin store uses it as the trust anchor for "official" packages —
+// a plugin signed by this key installs without the third-party
+// confirmation prompt.
+func ReleasePublicKey() ed25519.PublicKey {
+	k, err := decodeKey(releaseKeyHex)
+	if err != nil {
+		return nil
+	}
+	return k
+}
+
 // releaseKeyHex is the hex-encoded Ed25519 public half of the
 // release-signing key. Empty in source: production builds inject
 // the value at link time via

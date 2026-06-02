@@ -251,6 +251,7 @@ func main() {
 		machineIDPath = flag.String("secrets-machine-id", secrets.DefaultMachineIDPath, "path to /etc/machine-id (mixed into the encryption key); empty to skip")
 		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 		updateRepo    = flag.String("update-repo", "bigtaed-sys/knot-os", "GitHub <owner>/<name> to query for self-update releases")
+		pluginsIndex  = flag.String("plugins-index", "https://raw.githubusercontent.com/bigtaed-sys/knot-os/main/plugins/store.json", "URL of the plugin store catalog (JSON index)")
 	)
 	flag.Parse()
 
@@ -641,6 +642,16 @@ func main() {
 		})
 		apiSrv.SetPluginSupervisor(sup)
 		apiSrv.SetPluginSyncFn(func() { sup.Sync(plugins.List()) })
+
+		// Plugin store: install packages from the GitHub-hosted
+		// catalog. A package signed by the release key (the same trust
+		// anchor as auto-update) installs as "official"; anything else
+		// requires the operator's explicit confirmation.
+		installer := &plugin.Installer{Dir: *pluginsDir}
+		if k := update.ReleasePublicKey(); k != nil {
+			installer.TrustedKeys = []ed25519.PublicKey{k}
+		}
+		apiSrv.SetPluginStore(installer, *pluginsIndex)
 
 		_ = os.MkdirAll("/run/knot", 0o755)
 		_ = os.Remove(hostSock)

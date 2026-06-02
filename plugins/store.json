@@ -1,0 +1,16 @@
+{
+  "_comment": "KnotOS plugin store index. knotd fetches this from GitHub (raw) and the UI renders it. `official` is a display hint only — trust is decided at install time by verifying the package signature against the release key; unsigned/third-party packages require explicit confirmation.",
+  "plugins": [
+    {
+      "id": "example-hello",
+      "name": "Hello Plugin",
+      "description": "Reference plugin: shows live router state and a feed of router events, pulled through the permissioned host API.",
+      "version": "0.2.0",
+      "author": "KnotOS",
+      "official": true,
+      "url": "https://github.com/bigtaed-sys/knot-os/releases/latest/download/example-hello-linux-arm64.zip",
+      "sig_url": "https://github.com/bigtaed-sys/knot-os/releases/latest/download/example-hello-linux-arm64.zip.sig",
+      "permissions": ["status:read", "devices:read", "events:read"]
+    }
+  ]
+}

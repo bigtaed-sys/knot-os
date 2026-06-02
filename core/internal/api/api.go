@@ -52,6 +52,8 @@ type Server struct {
 	pluginSup       pluginRuntime
 	pluginSync      func() // reconcile running processes after a toggle
 	pluginRTs       sync.Map // socket path → *http.Transport (proxy reuse)
+	pluginInstaller *plugin.Installer
+	pluginIndexURL  string
 	eventBus        *events.Bus
 	devices         *deviceregistry.Registry
 	profiles        *profile.Registry

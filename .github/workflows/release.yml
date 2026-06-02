@@ -84,6 +84,29 @@ jobs:
             -o dist/arm64/knotctl \
             ./cli/cmd/knotctl
 
+      - name: Build, package + sign the example-hello plugin
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          GOWORK: 'off'
+          RELEASE_PRIVATE_KEY: ${{ secrets.RELEASE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          pdir=plugins/example-hello
+          ( cd "$pdir" && go build -trimpath -ldflags '-s -w' -o example-hello . )
+          # Package the manifest + binary at the zip root (matches the
+          # plugin store contract). Built in a clean staging dir so no
+          # stray files (go.mod, *.go) get bundled.
+          stage="$(mktemp -d)"
+          cp "$pdir/plugin.yaml" "$pdir/example-hello" "$stage/"
+          ( cd "$stage" && zip -q -X example-hello-linux-arm64.zip plugin.yaml example-hello )
+          mv "$stage/example-hello-linux-arm64.zip" dist/arm64/
+          go build -o /tmp/knot-sign ./core/cmd/knot-sign
+          /tmp/knot-sign \
+            -key "${RELEASE_PRIVATE_KEY}" \
+            -in dist/arm64/example-hello-linux-arm64.zip \
+            -out dist/arm64/example-hello-linux-arm64.zip.sig
+
       - name: Sign knotd with release key
         env:
           RELEASE_PRIVATE_KEY: ${{ secrets.RELEASE_PRIVATE_KEY }}
@@ -116,7 +139,8 @@ jobs:
       - name: Compute SHA-256 sums
         run: |
           cd dist/arm64
-          sha256sum knotd-linux-arm64 knotd-linux-arm64.sig knotctl > SHA256SUMS
+          sha256sum knotd-linux-arm64 knotd-linux-arm64.sig knotctl \
+            example-hello-linux-arm64.zip example-hello-linux-arm64.zip.sig > SHA256SUMS
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -125,6 +149,8 @@ jobs:
             dist/arm64/knotd-linux-arm64
             dist/arm64/knotd-linux-arm64.sig
             dist/arm64/knotctl
+            dist/arm64/example-hello-linux-arm64.zip
+            dist/arm64/example-hello-linux-arm64.zip.sig
             dist/arm64/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -328,6 +328,18 @@
 		"rt_stopped": "Stopped",
 		"runtime_stopped_title": "Plugin not running",
 		"runtime_stopped_help": "Enable the plugin on the manage page to start its process.",
+		"uninstall": "Uninstall",
+		"uninstall_confirm": "Remove the plugin \"{name}\" from the device?",
+		"store_title": "Plugin store",
+		"store_subtitle": "Catalog from GitHub. Official plugins are signed with the release key and install directly; third-party ones need confirmation.",
+		"store_unreachable": "Couldn't load the catalog.",
+		"store_empty": "Every available plugin is already installed.",
+		"official": "Official",
+		"third_party": "Third-party",
+		"by": "by {author}",
+		"confirm_title": "Third-party plugin",
+		"confirm_body": "\"{name}\" is not signed by a trusted key. It runs as a separate process on your router with access to the host API. Only install from a source you trust. Continue?",
+		"confirm_install": "Install anyway",
 		"v01_note": "Enabled plugins run as separate processes and talk to the router through the host API, scoped by the permissions in their manifest."
 	},
 	"system": {
