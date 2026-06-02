@@ -57,18 +57,45 @@ menu:
   | `KNOT_HOST_SOCKET` | Unix socket of knotd's host API |
   | `KNOT_HOST_TOKEN` | bearer token to authenticate host-API calls |
 
-## Serving UI / API
+## UI — declarative, native KnotOS look
 
-The plugin runs an HTTP server on `KNOT_PLUGIN_SOCKET`. knotd
-reverse-proxies it (auth-gated, operators only) at:
+The plugin runs an HTTP server on `KNOT_PLUGIN_SOCKET` and returns a
+**JSON UI spec** from its root (`GET /`). knotd reverse-proxies it
+(auth-gated) at `/api/plugins/<id>/proxy/`, and the web UI renders the
+spec with native KnotOS components at the route `/plugins/<id>`. The
+plugin never ships HTML or JS to the browser — so every plugin page
+matches the rest of the app, and there's no third-party code running
+in the admin UI.
 
+```json
+{
+  "title": "Hello Plugin",
+  "refresh_sec": 5,
+  "sections": [
+    { "title": "Router", "items": [
+      { "type": "text",  "text": "A short description." },
+      { "type": "stat",  "label": "Device", "value": "knot" },
+      { "type": "stat",  "label": "WAN", "value": "up", "tone": "ok" },
+      { "type": "badge", "text": "online", "tone": "ok" },
+      { "type": "table", "columns": ["Time","Event"], "rows": [["12:00","device_joined"]] }
+    ]}
+  ]
+}
 ```
-/api/plugins/<id>/proxy/<path>   →   http://<plugin-socket>/<path>
-```
 
-The UI opens it in an iframe at the SPA route `/plugins/<id>`. The
-proxied request carries `X-Knot-Plugin-Base` so the plugin can build
-correct self-links if needed.
+Item types: `stat` (label/value, optional `tone`), `text`, `badge`,
+`table`. `tone` ∈ `ok` | `warn` | `bad` | `neutral`. `refresh_sec`
+(>0) makes the UI re-fetch on that interval.
+
+## Sandbox
+
+On the device, knotd runs each plugin process as the unprivileged
+`knot-plugin` user (not root), in its own process group, with
+`Pdeathsig` so it's killed if knotd dies. A buggy or hostile plugin
+therefore can't read root-owned config/secrets or outlive the daemon.
+The host API token still scopes what each plugin may *ask* knotd to do.
+(Override the user with `knotd -plugin-user`; missing user ⇒ plugins
+run unconfined, logged.)
 
 ## Host API
 

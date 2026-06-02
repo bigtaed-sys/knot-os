@@ -43,6 +43,11 @@ type SupervisorOptions struct {
 	// HostSocket is the path of knotd's host-API Unix socket, handed
 	// to every plugin as KNOT_HOST_SOCKET.
 	HostSocket string
+	// RunAsUID/RunAsGID, when > 0, drop each plugin process to this
+	// unprivileged uid/gid (Linux only). 0 = run as the daemon's own
+	// user (no drop) — the dev / non-Linux path. See sandbox_linux.go.
+	RunAsUID int
+	RunAsGID int
 	// Logger receives supervision events. Defaults to log.Default().
 	Logger *log.Logger
 }
@@ -222,6 +227,9 @@ func (s *Supervisor) supervise(ctx context.Context, p Plugin, mp *managedProc) {
 		)
 		cmd.Stdout = pluginLogWriter{logger: s.opts.Logger, id: p.ID}
 		cmd.Stderr = pluginLogWriter{logger: s.opts.Logger, id: p.ID}
+		// OS-level confinement (Linux): drop to an unprivileged uid/gid
+		// and tie the child's lifetime to ours. No-op elsewhere.
+		applySandbox(cmd, s.opts.RunAsUID, s.opts.RunAsGID)
 		// WaitDelay bounds how long Wait blocks after ctx-cancel kills
 		// the process, so Stop never wedges the supervise goroutine.
 		cmd.WaitDelay = 5 * time.Second

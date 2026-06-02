@@ -17,6 +17,14 @@ systemctl mask dhcpcd.service                  2>/dev/null || true
 
 # avahi-daemon stays enabled for mDNS resolution of <hostname>.local.
 
+# Dedicated unprivileged user that plugin processes run as (M4
+# sandbox): knotd drops each plugin to this uid so a buggy or hostile
+# plugin can't touch root-owned config/secrets. --system = no login,
+# no home directory. knotd falls back to running plugins unconfined if
+# this user is absent, so older images keep working.
+id -u knot-plugin >/dev/null 2>&1 || \
+    useradd --system --no-create-home --shell /usr/sbin/nologin knot-plugin
+
 # Enable knotd. After flashing, the device will boot straight into
 # the open setup AP and serve the wizard at 192.168.42.1.
 systemctl enable knotd.service

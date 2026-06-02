@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"os/user"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -252,6 +254,7 @@ func main() {
 		pluginsDir    = flag.String("plugins-dir", "/usr/lib/knot/plugins", "directory containing installed plugins")
 		updateRepo    = flag.String("update-repo", "bigtaed-sys/knot-os", "GitHub <owner>/<name> to query for self-update releases")
 		pluginsIndex  = flag.String("plugins-index", "https://raw.githubusercontent.com/bigtaed-sys/knot-os-plugins/main/store.json", "URL of the plugin store catalog (JSON index)")
+		pluginUser    = flag.String("plugin-user", "knot-plugin", "unprivileged user to run plugin processes as (Linux); empty or unknown = run unconfined")
 	)
 	flag.Parse()
 
@@ -634,10 +637,24 @@ func main() {
 			hostSock  = "/run/knot/host.sock"
 			pluginRun = "/run/knot/plugins"
 		)
+		// Sandbox: resolve the unprivileged user plugins run as. If it
+		// doesn't exist (e.g. an older image), plugins run unconfined —
+		// log it rather than refusing to run them.
+		sandUID, sandGID := 0, 0
+		if *pluginUser != "" {
+			if u, err := user.Lookup(*pluginUser); err == nil {
+				sandUID, _ = strconv.Atoi(u.Uid)
+				sandGID, _ = strconv.Atoi(u.Gid)
+			} else {
+				logger.Printf("plugin host: user %q not found (%v) — plugins will run unconfined", *pluginUser, err)
+			}
+		}
 		sup := plugin.NewSupervisor(plugin.SupervisorOptions{
 			PluginsDir: *pluginsDir,
 			RuntimeDir: pluginRun,
 			HostSocket: hostSock,
+			RunAsUID:   sandUID,
+			RunAsGID:   sandGID,
 			Logger:     logger,
 		})
 		apiSrv.SetPluginSupervisor(sup)
@@ -654,11 +671,22 @@ func main() {
 		apiSrv.SetPluginStore(installer, *pluginsIndex)
 
 		_ = os.MkdirAll("/run/knot", 0o755)
+		_ = os.MkdirAll(pluginRun, 0o755)
+		// The plugin runs as sandUID and must be able to bind its socket
+		// in pluginRun, so hand that dir to it.
+		if sandUID > 0 {
+			_ = os.Chown(pluginRun, sandUID, sandGID)
+		}
 		_ = os.Remove(hostSock)
 		if ln, err := net.Listen("unix", hostSock); err != nil {
 			logger.Printf("plugin host: listen %s: %v (host API disabled)", hostSock, err)
 		} else {
 			_ = os.Chmod(hostSock, 0o600)
+			// Let the (non-root) plugin user reach the host socket; the
+			// per-plugin token still scopes what each one can do.
+			if sandUID > 0 {
+				_ = os.Chown(hostSock, sandUID, sandGID)
+			}
 			hostSrv := &http.Server{Handler: apiSrv.HostAPIHandler()}
 			go func() { _ = hostSrv.Serve(ln) }()
 			go func() { <-ctx.Done(); _ = hostSrv.Close() }()

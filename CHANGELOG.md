@@ -4,6 +4,18 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.9] — 2026-06-02
+
+Theme: **"Plugins that look native and run boxed-in"**.
+
+### Native plugin UI
+
+- **Plugins no longer ship HTML.** A plugin returns a declarative JSON UI spec (sections of `stat` / `text` / `badge` / `table` items, optional `refresh_sec`) from its socket; the web UI renders it with native KnotOS components at `/plugins/<id>`. Every plugin page now matches the rest of the app, and no third-party HTML/JS runs in the admin UI — the iframe is gone. The reference plugin emits the spec; the contract is in [docs/plugin-api.md](docs/plugin-api.md).
+
+### M4 — process sandbox
+
+- **Plugins run unprivileged.** knotd drops each plugin process to a dedicated `knot-plugin` user (created by the image), in its own process group, with `Pdeathsig` so it dies with the daemon. A buggy or hostile plugin can't read root-owned config/secrets or outlive knotd; the host-API token still scopes what it can ask for. Configurable with `-plugin-user`; a missing user logs and runs unconfined (older images keep working). Tighter layers (seccomp, namespaces) are a future increment.
+
 ## [2026.06.8] — 2026-06-02
 
 ### Changed
