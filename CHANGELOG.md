@@ -4,6 +4,22 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.12] — 2026-06-02
+
+Theme: **"Hands on the devices"** — direct access control over what's connected.
+
+### Per-device internet pause (+ timer)
+
+- Block a device's internet **right now** from its detail page — for 15 min / 1 hour / 8 hours / until you resume. Auto-resumes when the timer expires; survives a reboot. Enforcement is immediate (scheduler kick), not on the next tick. The devices list shows a **Paused** badge.
+
+### New-device quarantine
+
+- A network-wide switch (toggle on the Devices page): while on, a device that appears for the first time gets **no internet until you approve it**. Turning quarantine on auto-approves every device already known, so it never strands the household — only genuinely new arrivals are gated. Pending devices show an **approval** badge and an Approve button.
+
+Both ride the existing nftables block-set + scheduler (which now blocks on *paused OR un-approved-under-quarantine OR schedule*), and persist in the device registry. New API: `POST /devices/{mac}/{pause,resume,approve}` and `GET/PUT /devices/access`.
+
+*(Per-device speed limiting via `tc` is the next, separate step — it can break connectivity if mis-applied, so it warrants on-device validation rather than shipping blind into auto-update.)*
+
 ## [2026.06.11] — 2026-06-02
 
 Theme: **"A plugin you'd actually install"** — Dynamic DNS, plus the platform pieces a real configurable plugin needs.

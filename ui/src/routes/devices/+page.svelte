@@ -2,11 +2,12 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, ApiError } from '$lib/api';
+	import { apiGet, ApiError, API_BASE } from '$lib/api';
 	import { relativeTime, deviceIcon } from '$lib/format';
 	import type {
 		Device,
 		DevicesResponse,
+		AccessSettings,
 		BandwidthStats,
 		BandwidthResponse
 	} from '$lib/types';
@@ -59,8 +60,40 @@
 		}
 	}
 
+	let quarantine = $state(false);
+	let quarBusy = $state(false);
+
+	async function loadAccess() {
+		try {
+			const a = await apiGet<AccessSettings>('/devices/access');
+			quarantine = a.quarantine_new_devices;
+		} catch {
+			/* non-fatal */
+		}
+	}
+
+	async function setQuarantine(on: boolean) {
+		quarBusy = true;
+		try {
+			const res = await fetch(`${API_BASE}/devices/access`, {
+				method: 'PUT',
+				credentials: 'same-origin',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ quarantine_new_devices: on })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			quarantine = on;
+			await refreshOuter();
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		} finally {
+			quarBusy = false;
+		}
+	}
+
 	onMount(() => {
 		refreshOuter(true);
+		loadAccess();
 		timer = setInterval(() => {
 			now = new Date();
 			refreshOuter();
@@ -71,6 +104,7 @@
 	});
 
 	const onlineCount = $derived(devices.filter((d) => d.online).length);
+	const pendingCount = $derived(quarantine ? devices.filter((d) => !d.approved).length : 0);
 </script>
 
 <header class="mb-6">
@@ -108,6 +142,20 @@
 			<span class="text-zinc-500 dark:text-zinc-400"> / {devices.length}</span>
 			<span class="ml-1 text-zinc-500 dark:text-zinc-400">{$_('devices.online')}</span>
 		</span>
+		<div class="ml-auto flex items-center gap-2">
+			{#if pendingCount > 0}
+				<span class="badge badge-warn">{$_('devices.pending_count', { values: { n: pendingCount } })}</span>
+			{/if}
+			<button
+				class={quarantine ? 'btn-primary' : 'btn-ghost'}
+				disabled={quarBusy}
+				onclick={() => setQuarantine(!quarantine)}
+				title={$_('devices.quarantine_help')}
+			>
+				<i class="bi {quarantine ? 'bi-shield-fill-check' : 'bi-shield'}"></i>
+				{$_('devices.quarantine')}
+			</button>
+		</div>
 	</div>
 
 	<div class="space-y-2">
@@ -146,6 +194,18 @@
 							<span class="badge badge-warn" title={$_('devices.stale_help')}>
 								<i class="bi bi-clock-history"></i>
 								{$_('devices.stale')}
+							</span>
+						{/if}
+						{#if d.paused}
+							<span class="badge bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400">
+								<i class="bi bi-pause-circle-fill"></i>
+								{$_('devices.paused')}
+							</span>
+						{/if}
+						{#if quarantine && !d.approved}
+							<span class="badge badge-warn">
+								<i class="bi bi-shield-exclamation"></i>
+								{$_('devices.pending_approval')}
 							</span>
 						{/if}
 					</div>

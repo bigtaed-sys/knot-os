@@ -125,10 +125,20 @@ export interface Device {
 	last_seen: string;
 	last_arp_seen?: string;
 	profile_id?: string;
+	/** Manually paused (internet blocked) right now. */
+	paused?: boolean;
+	/** When the pause auto-resumes (far future = until manually resumed). */
+	pause_until?: string;
+	/** Approved under quarantine mode. */
+	approved?: boolean;
 }
 
 export interface DevicesResponse {
 	devices: Device[];
+}
+
+export interface AccessSettings {
+	quarantine_new_devices: boolean;
 }
 
 export interface BlockWindow {

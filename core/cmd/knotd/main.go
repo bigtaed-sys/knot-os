@@ -53,7 +53,12 @@ func (s schedulerDevices) List() []scheduler.Device {
 	all := s.r.List()
 	out := make([]scheduler.Device, 0, len(all))
 	for _, d := range all {
-		out = append(out, scheduler.Device{MAC: d.MAC, ProfileID: d.ProfileID})
+		out = append(out, scheduler.Device{
+			MAC:        d.MAC,
+			ProfileID:  d.ProfileID,
+			PauseUntil: d.PauseUntil,
+			Approved:   d.Approved,
+		})
 	}
 	return out
 }
@@ -411,10 +416,11 @@ func main() {
 		}
 	}
 	sched := scheduler.New(scheduler.Options{
-		Devices:  schedulerDevices{r: devices},
-		Profiles: schedulerProfiles{r: profiles},
-		Updater:  updater,
-		Logger:   logger,
+		Devices:    schedulerDevices{r: devices},
+		Profiles:   schedulerProfiles{r: profiles},
+		Updater:    updater,
+		Quarantine: devices.Quarantine,
+		Logger:     logger,
 	})
 	go sched.Run(ctx)
 

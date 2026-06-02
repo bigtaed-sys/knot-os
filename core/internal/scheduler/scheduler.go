@@ -45,13 +45,19 @@ type MACSetUpdater interface {
 type Device struct {
 	MAC       string
 	ProfileID string
+	// PauseUntil, when in the future, blocks the device regardless of
+	// its profile schedule (the manual "pause" control).
+	PauseUntil time.Time
+	// Approved gates the device under quarantine mode.
+	Approved bool
 }
 
 // Scheduler is the main loop.
 type Scheduler struct {
-	devices  DeviceProvider
-	profiles ProfileLookup
-	updater  MACSetUpdater
+	devices    DeviceProvider
+	profiles   ProfileLookup
+	updater    MACSetUpdater
+	quarantine func() bool // network-wide new-device quarantine switch
 
 	tick   time.Duration
 	now    func() time.Time // injectable for tests
@@ -66,9 +72,12 @@ type Options struct {
 	Devices  DeviceProvider
 	Profiles ProfileLookup
 	Updater  MACSetUpdater
-	Tick     time.Duration // 0 = default 30s
-	Now      func() time.Time
-	Logger   *log.Logger
+	// Quarantine reports whether new-device quarantine is on. nil =
+	// always off.
+	Quarantine func() bool
+	Tick       time.Duration // 0 = default 30s
+	Now        func() time.Time
+	Logger     *log.Logger
 }
 
 // New constructs a Scheduler. Run starts the loop.
@@ -82,13 +91,17 @@ func New(opts Options) *Scheduler {
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
 	}
+	if opts.Quarantine == nil {
+		opts.Quarantine = func() bool { return false }
+	}
 	return &Scheduler{
-		devices:  opts.Devices,
-		profiles: opts.Profiles,
-		updater:  opts.Updater,
-		tick:     opts.Tick,
-		now:      opts.Now,
-		logger:   opts.Logger,
+		devices:    opts.Devices,
+		profiles:   opts.Profiles,
+		updater:    opts.Updater,
+		quarantine: opts.Quarantine,
+		tick:       opts.Tick,
+		now:        opts.Now,
+		logger:     opts.Logger,
 	}
 }
 
@@ -115,13 +128,20 @@ func (s *Scheduler) Run(ctx context.Context) {
 // change pushes an immediate tick instead of waiting up to 30s).
 func (s *Scheduler) RunOnce() {
 	now := s.now()
+	quarantine := s.quarantine()
 	all := s.devices.List()
 	blocked := make([]string, 0, len(all))
 	for _, d := range all {
-		if d.ProfileID == "" {
-			continue
-		}
-		if s.profiles.IsBlockingAt(d.ProfileID, now) {
+		// A device is denied the internet if any of:
+		//   - it's manually paused (timer still running),
+		//   - quarantine is on and it hasn't been approved,
+		//   - its profile's schedule is in a block window now.
+		switch {
+		case !d.PauseUntil.IsZero() && d.PauseUntil.After(now):
+			blocked = append(blocked, d.MAC)
+		case quarantine && !d.Approved:
+			blocked = append(blocked, d.MAC)
+		case d.ProfileID != "" && s.profiles.IsBlockingAt(d.ProfileID, now):
 			blocked = append(blocked, d.MAC)
 		}
 	}

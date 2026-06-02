@@ -60,6 +60,30 @@ type Device struct {
 	// ProfileID assigns a profile to this device. Empty means
 	// "default profile". M10 wires this up to schedules and DNS.
 	ProfileID string `yaml:"profile_id,omitempty" json:"profile_id,omitempty"`
+
+	// PauseUntil, when set and still in the future, blocks this
+	// device's internet right now regardless of its profile schedule —
+	// the manual "pause" control. An indefinite pause uses a
+	// far-future sentinel (see PauseIndefinite). Persisted so a pause
+	// survives a daemon restart.
+	PauseUntil time.Time `yaml:"pause_until,omitempty" json:"pause_until,omitempty"`
+
+	// Approved gates the device when quarantine mode is on: an
+	// un-approved device gets no internet until the operator approves
+	// it. Existing devices are approved the moment quarantine is first
+	// enabled, so only devices that appear afterwards start
+	// un-approved. Meaningless (ignored) when quarantine is off.
+	Approved bool `yaml:"approved,omitempty" json:"approved"`
+}
+
+// PauseIndefinite is the sentinel far-future PauseUntil used for a
+// "pause until I resume" (no timer) block.
+var PauseIndefinite = time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// Paused reports whether the device is currently paused (manually
+// blocked) as of now.
+func (d Device) Paused(now time.Time) bool {
+	return !d.PauseUntil.IsZero() && d.PauseUntil.After(now)
 }
 
 // Label returns the best human label for the device, in priority:

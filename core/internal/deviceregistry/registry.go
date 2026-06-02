@@ -28,6 +28,11 @@ type Registry struct {
 	leaseFile string
 	arpFile   string
 
+	// quarantine, when true, denies internet to any device that isn't
+	// Approved. A network-wide access-control switch. Persisted in the
+	// store doc.
+	quarantine bool
+
 	// dirty flags whether in-memory state has diverged from storeFile.
 	// Cleared after a successful Flush.
 	dirty bool
@@ -151,6 +156,44 @@ func (r *Registry) SetProfileID(mac, id string) (Device, error) {
 	return r.Update(mac, func(d *Device) { d.ProfileID = id })
 }
 
+// Pause blocks the device's internet until `until`. Use
+// PauseIndefinite for a no-timer pause.
+func (r *Registry) Pause(mac string, until time.Time) (Device, error) {
+	return r.Update(mac, func(d *Device) { d.PauseUntil = until })
+}
+
+// Resume lifts a manual pause.
+func (r *Registry) Resume(mac string) (Device, error) {
+	return r.Update(mac, func(d *Device) { d.PauseUntil = time.Time{} })
+}
+
+// Approve marks the device as allowed under quarantine.
+func (r *Registry) Approve(mac string) (Device, error) {
+	return r.Update(mac, func(d *Device) { d.Approved = true })
+}
+
+// Quarantine reports whether new-device quarantine is on.
+func (r *Registry) Quarantine() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.quarantine
+}
+
+// SetQuarantine toggles new-device quarantine. Turning it ON approves
+// every device currently known, so the switch only affects devices
+// that appear afterwards — flipping it on never strands the household.
+func (r *Registry) SetQuarantine(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.quarantine = on
+	if on {
+		for _, d := range r.devices {
+			d.Approved = true
+		}
+	}
+	r.dirty = true
+}
+
 // Reset wipes the entire registry — both the in-memory map and
 // the on-disk YAML store. Used at setup-completion time: every
 // device the registry saw before the wizard finished was a
@@ -265,6 +308,7 @@ func (r *Registry) Load() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.quarantine = doc.QuarantineNewDevices
 	for _, d := range doc.Devices {
 		mac := normalizeMAC(d.MAC)
 		if mac == "" {
@@ -283,7 +327,7 @@ func (r *Registry) Load() error {
 // fields (IP, LeaseExpires) are not persisted.
 func (r *Registry) Save() error {
 	r.mu.RLock()
-	doc := storeDoc{Devices: make([]Device, 0, len(r.devices))}
+	doc := storeDoc{QuarantineNewDevices: r.quarantine, Devices: make([]Device, 0, len(r.devices))}
 	for _, d := range r.devices {
 		doc.Devices = append(doc.Devices, Device{
 			MAC:         d.MAC,
@@ -292,6 +336,8 @@ func (r *Registry) Save() error {
 			ProfileID:   d.ProfileID,
 			FirstSeen:   d.FirstSeen,
 			LastSeen:    d.LastSeen,
+			PauseUntil:  d.PauseUntil,
+			Approved:    d.Approved,
 		})
 	}
 	r.mu.RUnlock()
@@ -347,7 +393,8 @@ func (r *Registry) FlushIfDirty() error {
 }
 
 type storeDoc struct {
-	Devices []Device `yaml:"devices"`
+	QuarantineNewDevices bool     `yaml:"quarantine_new_devices,omitempty"`
+	Devices              []Device `yaml:"devices"`
 }
 
 // normalizeMAC lower-cases and validates a MAC. Returns empty string

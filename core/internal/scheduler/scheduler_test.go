@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +26,43 @@ func (f *fakeUpdater) UpdateBlockedMACs(macs []string) error {
 	cp := append([]string(nil), macs...)
 	f.calls = append(f.calls, cp)
 	return f.err
+}
+
+func TestRunOncePausedAndQuarantine(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	dev := &fakeDevices{list: []Device{
+		{MAC: "aa:aa:aa:aa:aa:aa", Approved: true, PauseUntil: now.Add(time.Hour)}, // paused → blocked
+		{MAC: "bb:bb:bb:bb:bb:bb", Approved: true, PauseUntil: now.Add(-time.Hour)}, // pause expired → not blocked
+		{MAC: "cc:cc:cc:cc:cc:cc", Approved: false},                                  // quarantine + not approved → blocked
+		{MAC: "dd:dd:dd:dd:dd:dd", Approved: true},                                   // fine
+		{MAC: "ee:ee:ee:ee:ee:ee", Approved: true, ProfileID: "kids"},                // schedule blocks
+	}}
+	prof := &fakeProfiles{blocking: map[string]bool{"kids": true}}
+	upd := &fakeUpdater{}
+	s := New(Options{
+		Devices: dev, Profiles: prof, Updater: upd, Tick: time.Hour,
+		Quarantine: func() bool { return true },
+		Now:        func() time.Time { return now },
+	})
+	s.RunOnce()
+
+	got := upd.calls[0]
+	sort.Strings(got)
+	want := []string{"aa:aa:aa:aa:aa:aa", "cc:cc:cc:cc:cc:cc", "ee:ee:ee:ee:ee:ee"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("blocked set = %v, want %v", got, want)
+	}
+}
+
+func TestRunOnceQuarantineOffIgnoresApproval(t *testing.T) {
+	dev := &fakeDevices{list: []Device{{MAC: "cc:cc:cc:cc:cc:cc", Approved: false}}}
+	upd := &fakeUpdater{}
+	// Quarantine off (default) → an un-approved device is NOT blocked.
+	s := New(Options{Devices: dev, Profiles: &fakeProfiles{}, Updater: upd, Tick: time.Hour})
+	s.RunOnce()
+	if len(upd.calls[0]) != 0 {
+		t.Errorf("quarantine off should block nothing, got %v", upd.calls[0])
+	}
 }
 
 func TestRunOncePicksBlockedDevices(t *testing.T) {

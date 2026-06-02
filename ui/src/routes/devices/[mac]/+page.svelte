@@ -163,8 +163,51 @@
 		}
 	}
 
+	// --- access control: pause / resume / approve ---------------------------
+	let quarantine = $state(false);
+	let accessBusy = $state(false);
+
+	async function loadAccess() {
+		try {
+			const a = await apiGet<{ quarantine_new_devices: boolean }>('/devices/access');
+			quarantine = a.quarantine_new_devices;
+		} catch {
+			/* non-fatal */
+		}
+	}
+
+	async function deviceAction(path: string, body?: unknown) {
+		accessBusy = true;
+		try {
+			const res = await fetch(`${API_BASE}/devices/${encodeURIComponent(mac)}/${path}`, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: body ? { 'content-type': 'application/json' } : {},
+				body: body ? JSON.stringify(body) : undefined
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			device = await res.json();
+		} catch (err) {
+			error = err instanceof Error ? err.message : String(err);
+		} finally {
+			accessBusy = false;
+		}
+	}
+	const pause = (minutes: number) => deviceAction('pause', { minutes });
+	const resume = () => deviceAction('resume');
+	const approve = () => deviceAction('approve');
+
+	function pauseLabel(d: Device): string {
+		if (!d.pause_until) return '';
+		const t = new Date(d.pause_until);
+		// Far-future sentinel ⇒ "until resumed".
+		if (t.getFullYear() >= 2900) return $_('devices.paused_indefinite');
+		return $_('devices.paused_until', { values: { time: t.toLocaleTimeString() } });
+	}
+
 	onMount(() => {
 		load();
+		loadAccess();
 		// Refresh bandwidth every 5s for a live graph.
 		bwTimer = setInterval(loadBandwidth, 5000);
 	});
@@ -237,6 +280,48 @@
 				</div>
 			</div>
 		</div>
+	</section>
+
+	<!-- Access control: pause / quarantine approval -->
+	<section class="surface p-5 mb-5">
+		<h2 class="font-semibold mb-3 flex items-center gap-2">
+			<i class="bi bi-shield-lock text-brand-500"></i>{$_('devices.access_title')}
+		</h2>
+
+		{#if quarantine && !device.approved}
+			<div class="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 mb-3">
+				<div class="text-sm text-amber-800 dark:text-amber-300">
+					<i class="bi bi-exclamation-triangle-fill mr-1"></i>{$_('devices.pending_approval')}
+				</div>
+				<button class="btn-primary" disabled={accessBusy} onclick={approve}>
+					{$_('devices.approve')}
+				</button>
+			</div>
+		{/if}
+
+		{#if device.paused}
+			<div class="flex items-center justify-between gap-3">
+				<div class="text-sm">
+					<span class="badge bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400">
+						<i class="bi bi-pause-circle-fill"></i>{$_('devices.paused')}
+					</span>
+					<span class="text-zinc-500 dark:text-zinc-400 ml-2">{pauseLabel(device)}</span>
+				</div>
+				<button class="btn-primary" disabled={accessBusy} onclick={resume}>
+					<i class="bi bi-play-fill"></i>{$_('devices.resume')}
+				</button>
+			</div>
+		{:else}
+			<div class="text-sm text-zinc-500 dark:text-zinc-400 mb-2">{$_('devices.pause_help')}</div>
+			<div class="flex flex-wrap gap-2">
+				<button class="btn-ghost" disabled={accessBusy} onclick={() => pause(15)}>15 {$_('devices.minutes')}</button>
+				<button class="btn-ghost" disabled={accessBusy} onclick={() => pause(60)}>1 {$_('devices.hour')}</button>
+				<button class="btn-ghost" disabled={accessBusy} onclick={() => pause(480)}>8 {$_('devices.hours')}</button>
+				<button class="btn-ghost text-red-600 dark:text-red-400" disabled={accessBusy} onclick={() => pause(0)}>
+					<i class="bi bi-pause-circle"></i>{$_('devices.pause_until_resume')}
+				</button>
+			</div>
+		{/if}
 	</section>
 
 	<!-- Bandwidth (M32) — only when we have samples -->

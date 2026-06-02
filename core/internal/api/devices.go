@@ -47,10 +47,87 @@ func (s *Server) MountDevices(r chi.Router) {
 		return
 	}
 	r.Get("/devices", s.handleListDevices)
+	// Network-wide access setting (static path before the {mac} param).
+	r.Get("/devices/access", s.handleGetAccess)
+	r.Put("/devices/access", s.handleSetAccess)
 	r.Get("/devices/{mac}", s.handleGetDevice)
 	r.Patch("/devices/{mac}", s.handlePatchDevice)
 	r.Delete("/devices/{mac}", s.handleDeleteDevice)
 	r.Post("/devices/{mac}/wake", s.handleWakeDevice)
+	r.Post("/devices/{mac}/pause", s.handlePauseDevice)
+	r.Post("/devices/{mac}/resume", s.handleResumeDevice)
+	r.Post("/devices/{mac}/approve", s.handleApproveDevice)
+}
+
+// handlePauseDevice blocks a device's internet now. Body {minutes}:
+// a positive value pauses for that long (auto-resume), 0/absent pauses
+// until the operator resumes. Enforcement is immediate (scheduler
+// kick), so the block takes effect within the request, not on the
+// next 30s tick.
+func (s *Server) handlePauseDevice(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	var body struct {
+		Minutes int `json:"minutes"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // empty body = indefinite
+	until := deviceregistry.PauseIndefinite
+	if body.Minutes > 0 {
+		until = time.Now().Add(time.Duration(body.Minutes) * time.Minute)
+	}
+	updated, err := s.devices.Pause(mac, until)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "device_not_found", err.Error())
+		return
+	}
+	_ = s.devices.FlushIfDirty()
+	s.kick()
+	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
+}
+
+func (s *Server) handleResumeDevice(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	updated, err := s.devices.Resume(mac)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "device_not_found", err.Error())
+		return
+	}
+	_ = s.devices.FlushIfDirty()
+	s.kick()
+	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
+}
+
+func (s *Server) handleApproveDevice(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	updated, err := s.devices.Approve(mac)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "device_not_found", err.Error())
+		return
+	}
+	_ = s.devices.FlushIfDirty()
+	s.kick()
+	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
+}
+
+func (s *Server) handleGetAccess(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"quarantine_new_devices": s.devices.Quarantine(),
+	})
+}
+
+func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		QuarantineNewDevices bool `json:"quarantine_new_devices"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	s.devices.SetQuarantine(body.QuarantineNewDevices)
+	_ = s.devices.FlushIfDirty()
+	s.kick()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"quarantine_new_devices": s.devices.Quarantine(),
+	})
 }
 
 // SetDeviceRegistry attaches a registry to the server. Called from main.
@@ -74,6 +151,9 @@ type deviceJSON struct {
 	LastSeen     time.Time `json:"last_seen"`
 	LastARPSeen  time.Time `json:"last_arp_seen,omitempty"`
 	ProfileID    string    `json:"profile_id,omitempty"`
+	Paused       bool      `json:"paused"`
+	PauseUntil   time.Time `json:"pause_until,omitempty"`
+	Approved     bool      `json:"approved"`
 }
 
 func toJSON(d deviceregistry.Device, now time.Time) deviceJSON {
@@ -90,6 +170,9 @@ func toJSON(d deviceregistry.Device, now time.Time) deviceJSON {
 		LastSeen:     d.LastSeen,
 		LastARPSeen:  d.LastARPSeen,
 		ProfileID:    d.ProfileID,
+		Paused:       d.Paused(now),
+		PauseUntil:   d.PauseUntil,
+		Approved:     d.Approved,
 	}
 }
 
