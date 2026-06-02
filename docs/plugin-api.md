@@ -89,13 +89,34 @@ Item types: `stat` (label/value, optional `tone`), `text`, `badge`,
 
 ## Sandbox
 
-On the device, knotd runs each plugin process as the unprivileged
-`knot-plugin` user (not root), in its own process group, with
-`Pdeathsig` so it's killed if knotd dies. A buggy or hostile plugin
-therefore can't read root-owned config/secrets or outlive the daemon.
-The host API token still scopes what each plugin may *ask* knotd to do.
-(Override the user with `knotd -plugin-user`; missing user ⇒ plugins
-run unconfined, logged.)
+On the device, knotd confines each plugin process:
+
+- **Unprivileged user** — runs as `knot-plugin` (not root), so it
+  can't read root-owned config/secrets. Override with
+  `knotd -plugin-user`; a missing user ⇒ unconfined (logged).
+- **Lifetime + process group** — own pgroup, `Pdeathsig` so it's
+  killed if knotd dies.
+- **Namespaces** — private PID / IPC / UTS namespaces (can't see or
+  signal other processes, share IPC, or touch the hostname).
+- **Network default-deny** — a plugin runs in an *empty network
+  namespace* (no internet, no LAN) **unless** it declares the
+  `network` permission. Its Unix sockets (host API + its own UI
+  socket) keep working regardless, since those are filesystem objects.
+  Declare `network` only if the plugin must reach the internet.
+
+The host-API token additionally scopes what a plugin may *ask* knotd
+to do. Future layers (seccomp, mount confinement, cgroup limits) can
+stack on top.
+
+### Permissions summary
+
+| Permission | Grants |
+|---|---|
+| `status:read` | `GET /host/v1/status` |
+| `devices:read` | `GET /host/v1/devices` |
+| `devices:write` | `POST /host/v1/devices/{mac}/profile` |
+| `events:read` | `GET /host/v1/events` |
+| `network` | outbound network access (else net-isolated) |
 
 ## Host API
 

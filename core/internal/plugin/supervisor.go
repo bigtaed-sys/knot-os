@@ -227,9 +227,12 @@ func (s *Supervisor) supervise(ctx context.Context, p Plugin, mp *managedProc) {
 		)
 		cmd.Stdout = pluginLogWriter{logger: s.opts.Logger, id: p.ID}
 		cmd.Stderr = pluginLogWriter{logger: s.opts.Logger, id: p.ID}
-		// OS-level confinement (Linux): drop to an unprivileged uid/gid
-		// and tie the child's lifetime to ours. No-op elsewhere.
-		applySandbox(cmd, s.opts.RunAsUID, s.opts.RunAsGID)
+		// OS-level confinement (Linux): drop to an unprivileged uid/gid,
+		// isolate PID/IPC/UTS namespaces, and — unless the plugin
+		// declared the "network" permission — give it an empty network
+		// namespace (no internet; its Unix sockets still work since
+		// those are filesystem objects). No-op on non-Linux.
+		applySandbox(cmd, s.opts.RunAsUID, s.opts.RunAsGID, p.Grants("network"))
 		// WaitDelay bounds how long Wait blocks after ctx-cancel kills
 		// the process, so Stop never wedges the supervise goroutine.
 		cmd.WaitDelay = 5 * time.Second

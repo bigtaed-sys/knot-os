@@ -19,14 +19,33 @@ import (
 //   - Pdeathsig SIGKILL: if knotd dies, the kernel reaps the plugin
 //     too — no orphaned plugin processes outliving the daemon.
 //
-// uid<=0 means "no drop" (dev / not configured). Tighter confinement
-// (seccomp, mount/network namespaces) is a future layer on top.
-func applySandbox(cmd *exec.Cmd, uid, gid int) {
+// On top of the privilege drop, M5 adds Linux namespace isolation:
+//
+//   - NEWPID / NEWIPC / NEWUTS: the plugin can't see or signal other
+//     processes, share SysV IPC, or read/change the host's hostname.
+//     Always on — cheap and safe for a single-process plugin.
+//   - NEWNET (default-deny network): unless the plugin declared the
+//     "network" permission, it runs in an empty network namespace —
+//     no internet, no LAN, not even loopback up. Its Unix sockets (the
+//     host API + its own listener) still work because those are
+//     filesystem objects, not network ones. A plugin that genuinely
+//     needs to reach the internet declares `network` and shares the
+//     host net instead.
+//
+// Namespaces are created at clone time while knotd is still root; the
+// uid drop (Credential) happens afterwards. uid<=0 means "no drop"
+// (dev / not configured). Tighter layers (seccomp, mount confinement,
+// cgroup limits) can stack on top later.
+func applySandbox(cmd *exec.Cmd, uid, gid int, allowNetwork bool) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setpgid = true
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
+	cmd.SysProcAttr.Cloneflags |= syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS
+	if !allowNetwork {
+		cmd.SysProcAttr.Cloneflags |= syscall.CLONE_NEWNET
+	}
 	if uid > 0 {
 		cmd.SysProcAttr.Credential = &syscall.Credential{
 			Uid:         uint32(uid),

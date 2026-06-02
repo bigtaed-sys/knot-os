@@ -4,6 +4,13 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.10] — 2026-06-02
+
+### M5 — plugin namespace isolation
+
+- **Plugins run in private PID / IPC / UTS namespaces** on top of the unprivileged-user drop, so a plugin can't see or signal other processes, share SysV IPC, or touch the host's hostname.
+- **Network is default-deny.** A plugin runs in an empty network namespace — no internet, no LAN — *unless* it declares the new `network` permission. Its Unix sockets (the host API and its own UI socket) keep working because those are filesystem objects, so a typical plugin (like the reference one) needs no network at all. A plugin that must reach the internet opts in explicitly with `network`. Documented in [docs/plugin-api.md](docs/plugin-api.md).
+
 ## [2026.06.9] — 2026-06-02
 
 Theme: **"Plugins that look native and run boxed-in"**.
