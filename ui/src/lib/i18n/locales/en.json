@@ -324,6 +324,7 @@
 		"manage": "Manage",
 		"not_found": "Plugin not found",
 		"spec_error": "The plugin returned an invalid UI.",
+		"action_ok": "Saved",
 		"rt_running": "Running",
 		"rt_crashed": "Crashed",
 		"rt_stopped": "Stopped",

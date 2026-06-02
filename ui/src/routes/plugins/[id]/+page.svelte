@@ -15,9 +15,52 @@
 		| { type: 'stat'; label: string; value: string; tone?: Tone }
 		| { type: 'text'; text: string }
 		| { type: 'badge'; text: string; tone?: Tone }
-		| { type: 'table'; columns: string[]; rows: string[][] };
+		| { type: 'table'; columns: string[]; rows: string[][] }
+		| { type: 'input'; key: string; label: string; value?: string; placeholder?: string; secret?: boolean }
+		| { type: 'select'; key: string; label: string; value?: string; options: { value: string; label: string }[] }
+		| { type: 'action'; label: string; action: string; style?: 'primary' | 'ghost' };
 	type Section = { title?: string; items: Item[] };
 	type Spec = { title?: string; refresh_sec?: number; sections: Section[] };
+
+	// Form state for interactive plugins, keyed by input/select `key`.
+	let form = $state<Record<string, string>>({});
+	let actionBusy = $state(false);
+	let actionMsg = $state<{ ok: boolean; text: string } | null>(null);
+
+	// Seed form values from the spec without clobbering what the user
+	// is currently editing (auto-refresh re-fetches the spec).
+	function syncForm(s: Spec) {
+		for (const sec of s.sections) {
+			for (const it of sec.items) {
+				if ((it.type === 'input' || it.type === 'select') && !(it.key in form)) {
+					form[it.key] = it.value ?? '';
+				}
+			}
+		}
+	}
+
+	async function runAction(action: string) {
+		actionBusy = true;
+		actionMsg = null;
+		try {
+			const res = await fetch(`${API_BASE}/plugins/${id}/proxy/${action}`, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(form)
+			});
+			if (!res.ok) {
+				const b = await res.json().catch(() => null);
+				throw new Error(b?.error?.message ?? `HTTP ${res.status}`);
+			}
+			actionMsg = { ok: true, text: $_('plugins.action_ok') };
+			await loadSpec();
+		} catch (e) {
+			actionMsg = { ok: false, text: e instanceof Error ? e.message : String(e) };
+		} finally {
+			actionBusy = false;
+		}
+	}
 
 	const id = $derived($page.params.id);
 
@@ -53,6 +96,7 @@
 			}
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			spec = (await res.json()) as Spec;
+			syncForm(spec);
 			running = true;
 			specError = null;
 		} catch (e) {
@@ -160,6 +204,31 @@
 							<span class="badge {toneClass(item.tone)} mr-1">{item.text}</span>
 						{:else if item.type === 'text'}
 							<p class="text-sm text-zinc-600 dark:text-zinc-300 py-1">{item.text}</p>
+						{:else if item.type === 'input'}
+							<label class="block py-2">
+								<span class="text-sm text-zinc-600 dark:text-zinc-300">{item.label}</span>
+								<input
+									type={item.secret ? 'password' : 'text'}
+									class="input mt-1"
+									placeholder={item.placeholder ?? ''}
+									bind:value={form[item.key]}
+								/>
+							</label>
+						{:else if item.type === 'select'}
+							<label class="block py-2">
+								<span class="text-sm text-zinc-600 dark:text-zinc-300">{item.label}</span>
+								<select class="input mt-1" bind:value={form[item.key]}>
+									{#each item.options as o}<option value={o.value}>{o.label}</option>{/each}
+								</select>
+							</label>
+						{:else if item.type === 'action'}
+							<button
+								class="{item.style === 'ghost' ? 'btn-ghost' : 'btn-primary'} mt-2 mr-2"
+								disabled={actionBusy}
+								onclick={() => runAction(item.action)}
+							>
+								{#if actionBusy}<span class="spinner"></span>{:else}{item.label}{/if}
+							</button>
 						{:else if item.type === 'table'}
 							<div class="overflow-x-auto -mx-1">
 								<table class="w-full text-sm">
@@ -181,6 +250,17 @@
 					{/each}
 				</section>
 			{/each}
+			{#if actionMsg}
+				<div
+					class="p-3 rounded-lg text-sm flex items-center gap-2
+						{actionMsg.ok
+							? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+							: 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'}"
+				>
+					<i class="bi {actionMsg.ok ? 'bi-check-circle' : 'bi-exclamation-circle'}"></i>
+					<span>{actionMsg.text}</span>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>

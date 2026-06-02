@@ -54,6 +54,7 @@ menu:
   |---|---|
   | `KNOT_PLUGIN_ID` | the plugin's id |
   | `KNOT_PLUGIN_SOCKET` | Unix socket path the plugin **must listen on** (its HTTP server) |
+  | `KNOT_PLUGIN_DATA` | a persistent, writable directory for the plugin's config/state (the one place an unprivileged plugin may write) |
   | `KNOT_HOST_SOCKET` | Unix socket of knotd's host API |
   | `KNOT_HOST_TOKEN` | bearer token to authenticate host-API calls |
 
@@ -83,9 +84,22 @@ in the admin UI.
 }
 ```
 
-Item types: `stat` (label/value, optional `tone`), `text`, `badge`,
-`table`. `tone` ∈ `ok` | `warn` | `bad` | `neutral`. `refresh_sec`
-(>0) makes the UI re-fetch on that interval.
+Display item types: `stat` (label/value, optional `tone`), `text`,
+`badge`, `table`. `tone` ∈ `ok` | `warn` | `bad` | `neutral`.
+`refresh_sec` (>0) makes the UI re-fetch on that interval.
+
+Interactive item types:
+
+- `input` — `{ "type":"input", "key":"...", "label":"...", "value":"...", "placeholder":"...", "secret":true }`
+- `select` — `{ "type":"select", "key":"...", "label":"...", "value":"...", "options":[{"value":"","label":""}] }`
+- `action` — `{ "type":"action", "label":"Save", "action":"save", "style":"primary|ghost" }`
+
+When the user clicks an `action`, the UI POSTs the current values of
+every `input`/`select` (keyed by `key`) as a JSON object to
+`/api/plugins/<id>/proxy/<action>`, then re-fetches the spec. The
+plugin handles that path (e.g. saves config) and returns `200`. Echo a
+secret back as empty with a "leave blank to keep" placeholder rather
+than re-sending it.
 
 ## Sandbox
 

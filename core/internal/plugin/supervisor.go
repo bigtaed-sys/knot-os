@@ -40,6 +40,12 @@ type SupervisorOptions struct {
 	// RuntimeDir is where per-plugin Unix sockets are created (e.g.
 	// /run/knot/plugins). Wiped-on-reboot tmpfs in production.
 	RuntimeDir string
+	// DataDir is the persistent state root (e.g. /var/lib/knot/
+	// plugins). Each plugin gets DataDir/<id>, created and chowned to
+	// the plugin user, handed over as KNOT_PLUGIN_DATA — the one place
+	// an unprivileged plugin may write (config, caches). Empty = no
+	// data dir provided.
+	DataDir string
 	// HostSocket is the path of knotd's host-API Unix socket, handed
 	// to every plugin as KNOT_HOST_SOCKET.
 	HostSocket string
@@ -217,11 +223,24 @@ func (s *Supervisor) supervise(ctx context.Context, p Plugin, mp *managedProc) {
 		_ = os.Remove(mp.socket)
 		_ = os.MkdirAll(s.opts.RuntimeDir, 0o755)
 
+		// Per-plugin persistent, writable data dir (the only place an
+		// unprivileged plugin can write). Created + handed to the
+		// plugin owner each launch.
+		dataDir := ""
+		if s.opts.DataDir != "" {
+			dataDir = filepath.Join(s.opts.DataDir, p.ID)
+			_ = os.MkdirAll(dataDir, 0o755)
+			if s.opts.RunAsUID > 0 {
+				_ = os.Chown(dataDir, s.opts.RunAsUID, s.opts.RunAsGID)
+			}
+		}
+
 		cmd := exec.CommandContext(ctx, argv0, args...)
 		cmd.Dir = pluginDir
 		cmd.Env = append(os.Environ(),
 			"KNOT_PLUGIN_ID="+p.ID,
 			"KNOT_PLUGIN_SOCKET="+mp.socket,
+			"KNOT_PLUGIN_DATA="+dataDir,
 			"KNOT_HOST_SOCKET="+s.opts.HostSocket,
 			"KNOT_HOST_TOKEN="+mp.token,
 		)

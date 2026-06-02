@@ -1,0 +1,21 @@
+id: ddns
+name: Dynamic DNS
+version: 0.1.0
+description: Keeps a DuckDNS (or any custom-URL) hostname pointed at your changing public IP, so you can reach home from anywhere.
+
+exec:
+  - ./ddns
+
+# Reads the WAN IP from the host API, watches for changes via the event
+# stream, and reaches the DDNS provider over the internet — so it needs
+# the network permission (most plugins don't).
+permissions:
+  - status:read
+  - events:read
+  - network
+
+menu:
+  - path: /plugins/ddns
+    label: Dynamic DNS
+    icon: bi-hdd-network
+    order: 110

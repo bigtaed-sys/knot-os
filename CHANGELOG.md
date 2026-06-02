@@ -4,6 +4,20 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.11] — 2026-06-02
+
+Theme: **"A plugin you'd actually install"** — Dynamic DNS, plus the platform pieces a real configurable plugin needs.
+
+### Dynamic DNS plugin
+
+- **New `ddns` plugin** (in the store): keeps a DuckDNS — or any custom-URL provider — hostname pointed at your changing public IP, so you can reach home from anywhere. It reads the WAN IP from the host API, reacts to `wan_status` events to update immediately on an IP change (plus a 5-min re-assert), and shows status (public IP, domain, last update + result) with a config form (provider, domain, token, custom URL). Declares the `network` permission; stores its config in the plugin data dir.
+
+### Platform additions that made it possible
+
+- **Interactive plugin UI.** The declarative UI spec gained `input`, `select`, and `action` items. Clicking an action POSTs the form values to the plugin (`/api/plugins/<id>/proxy/<action>`); still rendered natively by KnotOS, still no plugin HTML/JS in the browser.
+- **Per-plugin data directory.** Plugins now get `KNOT_PLUGIN_DATA` — a persistent, writable directory (`/var/lib/knot/plugins/<id>`, owned by the plugin user) — the one place an unprivileged, sandboxed plugin may persist config/state.
+- **Release pipeline** builds, zips, and signs *every* bundled Go plugin (glob-based), so adding a plugin needs no CI change.
+
 ## [2026.06.10] — 2026-06-02
 
 ### M5 — plugin namespace isolation

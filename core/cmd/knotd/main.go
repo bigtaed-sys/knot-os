@@ -652,6 +652,7 @@ func main() {
 		sup := plugin.NewSupervisor(plugin.SupervisorOptions{
 			PluginsDir: *pluginsDir,
 			RuntimeDir: pluginRun,
+			DataDir:    "/var/lib/knot/plugins",
 			HostSocket: hostSock,
 			RunAsUID:   sandUID,
 			RunAsGID:   sandGID,
