@@ -1,9 +1,22 @@
 id: example-hello
 name: Hello Plugin
-version: 0.1.0
-description: A reference plugin that demonstrates the v0.1 contract — manifest, enable/disable, and a sidebar menu entry.
+version: 0.2.0
+description: Reference plugin for the v2 runtime — a separate process serving a page that reads live router state through the host API.
+
+# The runtime: knotd launches this argv while the plugin is enabled.
+# "./example-hello" resolves to the binary in the plugin's own
+# directory (/usr/lib/knot/plugins/example-hello/example-hello).
+exec:
+  - ./example-hello
+
+# Host-API scopes this plugin needs. The host returns 403 for any
+# endpoint outside this set.
+permissions:
+  - status:read
+  - devices:read
+
 menu:
-  - path: /plugins/example-hello/hello
+  - path: /plugins/example-hello
     label: Hello
     icon: bi-stars
     order: 100

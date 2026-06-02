@@ -48,6 +48,9 @@ type Server struct {
 	backend         network.Backend
 	sessions        *auth.Sessions
 	plugins         *plugin.Registry
+	pluginSup       pluginRuntime
+	pluginSync      func() // reconcile running processes after a toggle
+	pluginRTs       sync.Map // socket path → *http.Transport (proxy reuse)
 	devices         *deviceregistry.Registry
 	profiles        *profile.Registry
 	dns             *dnsServices

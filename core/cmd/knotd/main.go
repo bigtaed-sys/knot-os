@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"net"
+	"net/http"
 
 	"github.com/knot-os/knot-os/core/internal/api"
 	"github.com/knot-os/knot-os/core/internal/auth"
@@ -613,6 +614,43 @@ func main() {
 	// of -dev because that's the same condition that picks the real
 	// LinuxBackend.
 	apiSrv.SetProductionMode(!*dev)
+
+	// Plugin runtime: supervise enabled plugins as subprocesses and
+	// expose the host API on a root-owned loopback Unix socket they
+	// call back through. Production-only — the plugin dir and /run
+	// sockets are a device concern; dev mode discovers and lists
+	// plugins but runs none.
+	if !*dev {
+		const (
+			hostSock  = "/run/knot/host.sock"
+			pluginRun = "/run/knot/plugins"
+		)
+		sup := plugin.NewSupervisor(plugin.SupervisorOptions{
+			PluginsDir: *pluginsDir,
+			RuntimeDir: pluginRun,
+			HostSocket: hostSock,
+			Logger:     logger,
+		})
+		apiSrv.SetPluginSupervisor(sup)
+		apiSrv.SetPluginSyncFn(func() { sup.Sync(plugins.List()) })
+
+		_ = os.MkdirAll("/run/knot", 0o755)
+		_ = os.Remove(hostSock)
+		if ln, err := net.Listen("unix", hostSock); err != nil {
+			logger.Printf("plugin host: listen %s: %v (host API disabled)", hostSock, err)
+		} else {
+			_ = os.Chmod(hostSock, 0o600)
+			hostSrv := &http.Server{Handler: apiSrv.HostAPIHandler()}
+			go func() { _ = hostSrv.Serve(ln) }()
+			go func() { <-ctx.Done(); _ = hostSrv.Close() }()
+			logger.Printf("plugin host: API on %s", hostSock)
+		}
+
+		// Bring up whatever's already enabled, and tear everything
+		// down cleanly on shutdown.
+		sup.Sync(plugins.List())
+		defer sup.StopAll()
+	}
 
 	// WireGuard road-warrior server. Persisted in
 	// /etc/knot/wg.yaml; key generated on first boot. Apply hook

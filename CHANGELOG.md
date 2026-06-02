@@ -4,6 +4,18 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.6] — 2026-06-02
+
+Theme: **"Plugins that actually run"**. The plugin system graduates from metadata-only scaffolding to a real runtime.
+
+### Plugin runtime
+
+- **Enabled plugins run as supervised subprocesses.** knotd starts a plugin's process when enabled, stops it when disabled, restarts it with capped backoff on crash, and brings enabled plugins back up at boot. Runtime state (running / crashed / stopped, restart count, last error) is surfaced on the Plugins page.
+- **HTTP-over-Unix-socket contract**, language-agnostic. A plugin listens on `KNOT_PLUGIN_SOCKET`; knotd reverse-proxies it (auth-gated) at `/api/plugins/<id>/proxy/` and the UI opens it in an iframe at `/plugins/<id>`.
+- **Permissioned host API.** Plugins call back into knotd over `KNOT_HOST_SOCKET` with a per-plugin bearer token; each endpoint (`/host/v1/{whoami,status,devices}`) is gated by a permission the plugin declares in its manifest, so a plugin only reaches what it asked for.
+- **Manifest v2**: `exec` (argv to launch) + `permissions`, fully backward-compatible — a manifest without `exec` stays a metadata-only plugin.
+- **Reference plugin** `example-hello` rewritten as a real, dependency-free Go process that renders live router state pulled through the host API. The image build now compiles bundled Go plugins for arm64 and ships only the manifest + binary. Contract documented in [docs/plugin-api.md](docs/plugin-api.md).
+
 ## [2026.06.5] — 2026-06-02
 
 ### Changed

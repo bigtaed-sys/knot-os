@@ -100,8 +100,20 @@ for p in "$ROOT/plugins"/*/; do
     name="$(basename "$p")"
     [[ "$name" == "README.md" ]] && continue
     if [[ -f "$p/plugin.yaml" ]]; then
-        cp -r "$p" "$PLUGINS_FILES_DIR/"
-        echo "    + $name"
+        dest="$PLUGINS_FILES_DIR/$name"
+        cp -r "$p" "$dest"
+        # A plugin that ships Go source (go.mod + main.go) is built
+        # here for the Pi and its source stripped from the image — the
+        # rootfs gets only the manifest + the arm64 binary the runtime
+        # launches via the manifest's `exec`.
+        if [[ -f "$dest/go.mod" && -f "$dest/main.go" ]]; then
+            echo "    + $name (building binary)"
+            ( cd "$dest" && run_user env GOOS=linux GOARCH=arm64 GOFLAGS=-mod=mod \
+                go build -trimpath -ldflags '-s -w' -o "$name" . )
+            rm -f "$dest"/*.go "$dest/go.mod" "$dest/go.sum"
+        else
+            echo "    + $name"
+        fi
     fi
 done
 shopt -u nullglob

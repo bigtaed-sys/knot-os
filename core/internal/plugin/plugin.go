@@ -42,6 +42,37 @@ type Manifest struct {
 	// Empty for plugins that don't add UI; non-empty entries are
 	// surfaced to the web UI and rendered when the plugin is enabled.
 	Menu []MenuItem `yaml:"menu,omitempty" json:"menu,omitempty"`
+
+	// Exec is the argv used to launch the plugin process while it is
+	// enabled. argv[0] is resolved relative to the plugin's own
+	// directory when it starts with "./". The process is handed two
+	// env vars: KNOT_PLUGIN_SOCKET (the Unix socket path it must
+	// listen on for its HTTP UI/API) and KNOT_HOST_SOCKET +
+	// KNOT_HOST_TOKEN (how it calls back into knotd's host API).
+	//
+	// Empty Exec = a metadata-only plugin: discovered and toggleable
+	// but running no code — the v0.1 behaviour, still supported.
+	Exec []string `yaml:"exec,omitempty" json:"exec,omitempty"`
+
+	// Permissions lists the host-API capabilities the plugin needs.
+	// The host enforces them: a call to an endpoint outside the
+	// granted set returns 403. Known values: "status:read",
+	// "devices:read". Unknown entries are ignored (forward-compat).
+	Permissions []string `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+}
+
+// HasRuntime reports whether this plugin launches a process (Exec
+// set) versus being metadata-only.
+func (m Manifest) HasRuntime() bool { return len(m.Exec) > 0 }
+
+// Grants reports whether the manifest requested permission p.
+func (m Manifest) Grants(p string) bool {
+	for _, g := range m.Permissions {
+		if g == p {
+			return true
+		}
+	}
+	return false
 }
 
 // MenuItem describes a single sidebar entry contributed by a plugin.
@@ -91,6 +122,11 @@ func (m Manifest) validate() error {
 		}
 		if item.Label == "" {
 			return fmt.Errorf("menu[%d].label is required", i)
+		}
+	}
+	for i, a := range m.Exec {
+		if a == "" {
+			return fmt.Errorf("exec[%d] must not be empty", i)
 		}
 	}
 	return nil

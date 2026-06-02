@@ -319,7 +319,16 @@
 		"disabled": "Disabled",
 		"enable": "Enable",
 		"disable": "Disable",
-		"v01_note": "v0.1 plugins are metadata only. Runtime ships in v0.2."
+		"open": "Open",
+		"reload": "Reload",
+		"manage": "Manage",
+		"not_found": "Plugin not found",
+		"rt_running": "Running",
+		"rt_crashed": "Crashed",
+		"rt_stopped": "Stopped",
+		"runtime_stopped_title": "Plugin not running",
+		"runtime_stopped_help": "Enable the plugin on the manage page to start its process.",
+		"v01_note": "Enabled plugins run as separate processes and talk to the router through the host API, scoped by the permissions in their manifest."
 	},
 	"system": {
 		"title": "System",

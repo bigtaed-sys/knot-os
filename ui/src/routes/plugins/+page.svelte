@@ -42,6 +42,26 @@
 	}
 
 	onMount(refresh);
+
+	function runtimeBadge(p: Plugin): { label: string; cls: string; icon: string } | null {
+		if (!p.runtime) return null;
+		switch (p.runtime.state) {
+			case 'running':
+				return { label: $_('plugins.rt_running'), cls: 'badge-ok', icon: 'bi-play-circle-fill' };
+			case 'crashed':
+				return {
+					label: $_('plugins.rt_crashed'),
+					cls: 'badge bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400',
+					icon: 'bi-exclamation-triangle-fill'
+				};
+			default:
+				return { label: $_('plugins.rt_stopped'), cls: 'badge-neutral', icon: 'bi-stop-circle' };
+		}
+	}
+
+	function hasUI(p: Plugin): boolean {
+		return !!p.menu && p.menu.length > 0;
+	}
 </script>
 
 <header class="mb-6">
@@ -88,28 +108,43 @@
 									{$_('plugins.enabled')}
 								</span>
 							{/if}
+							{#if runtimeBadge(p)}
+								{@const rb = runtimeBadge(p)}
+								<span class="badge {rb!.cls}" title={p.runtime?.last_error ?? ''}>
+									<i class="bi {rb!.icon} text-xs"></i>
+									{rb!.label}{#if (p.runtime?.restarts ?? 0) > 0} · ×{p.runtime?.restarts}{/if}
+								</span>
+							{/if}
 						</div>
 						<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">{p.id}</div>
 						{#if p.description}
 							<p class="text-sm text-zinc-600 dark:text-zinc-300 mt-2">{p.description}</p>
 						{/if}
 					</div>
-					<button
-						type="button"
-						class={p.enabled ? 'btn-ghost' : 'btn-primary'}
-						disabled={toggling[p.id]}
-						onclick={() => toggle(p)}
-					>
-						{#if toggling[p.id]}
-							<span class="spinner"></span>
-						{:else if p.enabled}
-							<i class="bi bi-toggle-on"></i>
-							{$_('plugins.disable')}
-						{:else}
-							<i class="bi bi-toggle-off"></i>
-							{$_('plugins.enable')}
+					<div class="flex items-center gap-2 shrink-0">
+						{#if p.enabled && hasUI(p)}
+							<a class="btn-ghost" href={`/plugins/${encodeURIComponent(p.id)}`}>
+								<i class="bi bi-box-arrow-up-right"></i>
+								{$_('plugins.open')}
+							</a>
 						{/if}
-					</button>
+						<button
+							type="button"
+							class={p.enabled ? 'btn-ghost' : 'btn-primary'}
+							disabled={toggling[p.id]}
+							onclick={() => toggle(p)}
+						>
+							{#if toggling[p.id]}
+								<span class="spinner"></span>
+							{:else if p.enabled}
+								<i class="bi bi-toggle-on"></i>
+								{$_('plugins.disable')}
+							{:else}
+								<i class="bi bi-toggle-off"></i>
+								{$_('plugins.enable')}
+							{/if}
+						</button>
+					</div>
 				</div>
 			</article>
 		{/each}

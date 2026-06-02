@@ -83,6 +83,15 @@ export interface PluginMenuItem {
 	order?: number;
 }
 
+/** Live process state of a plugin with a runtime (Exec set). */
+export interface PluginRuntime {
+	state: 'stopped' | 'running' | 'crashed';
+	pid?: number;
+	restarts?: number;
+	last_error?: string;
+	since?: string;
+}
+
 export interface Plugin {
 	id: string;
 	name: string;
@@ -91,6 +100,12 @@ export interface Plugin {
 	enabled: boolean;
 	/** Sidebar menu items contributed by this plugin (read from manifest). */
 	menu?: PluginMenuItem[];
+	/** argv the runtime launches; absent for metadata-only plugins. */
+	exec?: string[];
+	/** Host-API scopes the plugin declares. */
+	permissions?: string[];
+	/** Live process state; absent when the plugin has no runtime. */
+	runtime?: PluginRuntime;
 }
 
 export interface PluginsResponse {
