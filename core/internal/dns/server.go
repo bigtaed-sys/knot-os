@@ -25,6 +25,16 @@ type DeviceLookup interface {
 	BlocklistsForIP(ip net.IP) (mac string, blocklists []string, ok bool)
 }
 
+// CaptiveLookup decides, per source IP, whether the device should be
+// captive-redirected to the router's landing page. When ok is true,
+// the resolver answers every A query with `ip` (the router's LAN
+// address) and NODATA for everything else, so any hostname the device
+// opens lands on knotd — the "blocked / awaiting approval" page. Used
+// for the per-device pause + quarantine landing screen.
+type CaptiveLookup interface {
+	CaptiveIP(srcIP net.IP) (ip net.IP, ok bool)
+}
+
 // nopLookup is a DeviceLookup that knows nothing — used when the
 // resolver runs without device-aware filtering (dev mode, single-user
 // scenarios). Every query is treated as "no profile" -> no blocklist.
@@ -82,6 +92,9 @@ type Options struct {
 	// Devices resolves source IPs to a profile's blocklists. Pass
 	// nil to disable per-device filtering.
 	Devices DeviceLookup
+	// Captive, when non-nil, redirects blocked devices' DNS to the
+	// router's landing page. Pass nil to disable.
+	Captive CaptiveLookup
 	// Log receives one QueryEvent per query. Pass nil to discard.
 	Log QueryLog
 	// Cache, when non-nil, is consulted before forwarding. Allowed
@@ -290,6 +303,21 @@ func (s *Server) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 	qname := normalizeDomain(q.Name)
 	srcIP, srcPort := splitAddr(w.RemoteAddr())
 
+	// Captive landing: a blocked device's every lookup resolves to the
+	// router so any site it opens shows the "blocked / awaiting
+	// approval" page. Takes precedence over normal resolution.
+	if s.opts.Captive != nil {
+		if gw, ok := s.opts.Captive.CaptiveIP(srcIP); ok {
+			s.replyCaptive(w, r, gw)
+			s.opts.Log.Append(QueryEvent{
+				When: time.Now(), SrcIP: srcIP.String(),
+				QName: qname, QType: mdns.TypeToString[q.Qtype],
+				Blocked: true, BlockedBy: "captive",
+			})
+			return
+		}
+	}
+
 	mac, blocklists, _ := s.opts.Devices.BlocklistsForIP(srcIP)
 
 	if blocklistName := s.findBlocking(qname, blocklists); blocklistName != "" {
@@ -384,6 +412,24 @@ func (s *Server) forward(r *mdns.Msg) (*mdns.Msg, error) {
 func (s *Server) replyNXDOMAIN(w mdns.ResponseWriter, r *mdns.Msg) {
 	resp := new(mdns.Msg)
 	resp.SetRcode(r, mdns.RcodeNameError) // NXDOMAIN
+	_ = w.WriteMsg(resp)
+}
+
+// replyCaptive answers an A query with the router's IP (short TTL) and
+// NODATA for anything else, forcing the client onto the landing page
+// over IPv4.
+func (s *Server) replyCaptive(w mdns.ResponseWriter, r *mdns.Msg, ip net.IP) {
+	resp := new(mdns.Msg)
+	resp.SetReply(r)
+	resp.Authoritative = true
+	q := r.Question[0]
+	if q.Qtype == mdns.TypeA && ip.To4() != nil {
+		if rr, err := mdns.NewRR(fmt.Sprintf("%s 30 IN A %s", q.Name, ip.String())); err == nil {
+			resp.Answer = append(resp.Answer, rr)
+		}
+	}
+	// AAAA / HTTPS / etc. → NOERROR with no answer (NODATA), so the
+	// client falls back to the captive A record.
 	_ = w.WriteMsg(resp)
 }
 

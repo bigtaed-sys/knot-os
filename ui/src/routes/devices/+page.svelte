@@ -61,28 +61,32 @@
 	}
 
 	let quarantine = $state(false);
+	let blockLanding = $state(false);
 	let quarBusy = $state(false);
 
 	async function loadAccess() {
 		try {
 			const a = await apiGet<AccessSettings>('/devices/access');
 			quarantine = a.quarantine_new_devices;
+			blockLanding = a.block_landing_page;
 		} catch {
 			/* non-fatal */
 		}
 	}
 
-	async function setQuarantine(on: boolean) {
+	async function setAccess(patch: Partial<AccessSettings>) {
 		quarBusy = true;
 		try {
 			const res = await fetch(`${API_BASE}/devices/access`, {
 				method: 'PUT',
 				credentials: 'same-origin',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ quarantine_new_devices: on })
+				body: JSON.stringify(patch)
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			quarantine = on;
+			const a = (await res.json()) as AccessSettings;
+			quarantine = a.quarantine_new_devices;
+			blockLanding = a.block_landing_page;
 			await refreshOuter();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -142,14 +146,23 @@
 			<span class="text-zinc-500 dark:text-zinc-400"> / {devices.length}</span>
 			<span class="ml-1 text-zinc-500 dark:text-zinc-400">{$_('devices.online')}</span>
 		</span>
-		<div class="ml-auto flex items-center gap-2">
+		<div class="ml-auto flex items-center gap-2 flex-wrap justify-end">
 			{#if pendingCount > 0}
 				<span class="badge badge-warn">{$_('devices.pending_count', { values: { n: pendingCount } })}</span>
 			{/if}
 			<button
+				class={blockLanding ? 'btn-primary' : 'btn-ghost'}
+				disabled={quarBusy}
+				onclick={() => setAccess({ block_landing_page: !blockLanding })}
+				title={$_('devices.landing_help')}
+			>
+				<i class="bi {blockLanding ? 'bi-signpost-2-fill' : 'bi-signpost-2'}"></i>
+				{$_('devices.landing')}
+			</button>
+			<button
 				class={quarantine ? 'btn-primary' : 'btn-ghost'}
 				disabled={quarBusy}
-				onclick={() => setQuarantine(!quarantine)}
+				onclick={() => setAccess({ quarantine_new_devices: !quarantine })}
 				title={$_('devices.quarantine_help')}
 			>
 				<i class="bi {quarantine ? 'bi-shield-fill-check' : 'bi-shield'}"></i>

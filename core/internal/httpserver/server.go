@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -57,6 +58,18 @@ type Server struct {
 	// HTTPS for every non-allowlisted path. Atomic so SetRedirect
 	// is safe from any goroutine.
 	redirectHTTPS atomic.Bool
+
+	// blockedPageFn, when set, is consulted per request: if it returns
+	// (page, true) for the client IP, that HTML is served for any path
+	// instead of the app — the "blocked / awaiting approval" landing.
+	// Set once before Start.
+	blockedPageFn func(clientIP string) ([]byte, bool)
+}
+
+// SetBlockedPageFn installs the blocked-device landing hook. Call
+// before Start.
+func (s *Server) SetBlockedPageFn(fn func(clientIP string) ([]byte, bool)) {
+	s.blockedPageFn = fn
 }
 
 // New constructs a Server but does not start it.
@@ -71,6 +84,24 @@ func New(opts Options) *Server {
 	r.Use(requestLogger(opts.Logger))
 
 	s := &Server{opts: opts, router: r}
+
+	// Blocked-device landing: a paused / awaiting-approval device's DNS
+	// is captive-redirected here, so serve it the explanatory page for
+	// any path. Exempts the public allowlist (healthz / CA download).
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if s.blockedPageFn != nil && !plaintextAllowed(req.URL.Path) {
+				if page, blocked := s.blockedPageFn(clientIP(req)); blocked {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("Cache-Control", "no-store")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(page)
+					return
+				}
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
 
 	// Health endpoint — always available, never auth-gated, used by readiness
 	// probes and CI smoke tests.
@@ -144,6 +175,16 @@ func (s *Server) httpHandler() http.Handler {
 		}
 		s.router.ServeHTTP(w, r)
 	})
+}
+
+// clientIP returns the request's source IP without the port. With
+// middleware.RealIP upstream, RemoteAddr already reflects the real
+// client; we just drop the port if present.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // plaintextAllowed reports whether the path is exempt from the

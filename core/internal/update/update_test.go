@@ -151,8 +151,13 @@ func TestIsNewer(t *testing.T) {
 		{"0.3.0", "0.3.0", false},
 		{"0.3.0", "0.3.1", false},
 		{"1.0.0", "0.99.99", true},
-		{"0.3.0-rc1", "0.3.0", false}, // pre-release not greater than release
+		{"0.3.0-rc1", "0.3.0", false}, // non-numeric suffix not greater than release
 		{"v0.4.0", "v0.3.7", true},
+		// CalVer patch suffixes compare numerically.
+		{"2026.06.13-1", "2026.06.13", true},
+		{"2026.06.13-2", "2026.06.13-1", true},
+		{"2026.06.13", "2026.06.13-1", false},
+		{"2026.07.1", "2026.06.13-9", true},
 	}
 	for _, c := range cases {
 		got := isNewer(c.latest, c.current)

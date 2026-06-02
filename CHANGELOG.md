@@ -4,6 +4,16 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.13] — 2026-06-02
+
+### Blocked-device landing page
+
+- An optional toggle (Devices page): when a device is **paused**, **awaiting quarantine approval**, or **schedule-blocked**, its DNS is captive-redirected to the router, which serves a clear bilingual page saying *why* it has no internet. Because OS captive-portal detection probes plain HTTP, the page **pops up automatically** and any site the user opens lands on it — no nftables surgery, just DNS + an HTTP intercept. Off by default; the device still gets no internet either way, this just explains it.
+
+### Versioning
+
+- **Auto-update now understands patch versions.** `isNewer` compares the `-PATCH` suffix numerically (`2026.06.13-2 > 2026.06.13-1 > 2026.06.13`), so small follow-ups can ship as patch tags (`vYEAR.MONTH.RELEASE-N`) instead of burning a release number each time. This is the last plain release bump needed to teach the updater that; subsequent small changes will be patches.
+
 ## [2026.06.12] — 2026-06-02
 
 Theme: **"Hands on the devices"** — direct access control over what's connected.

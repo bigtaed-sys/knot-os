@@ -111,22 +111,31 @@ func (s *Server) handleApproveDevice(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetAccess(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"quarantine_new_devices": s.devices.Quarantine(),
+		"block_landing_page":     s.devices.BlockLanding(),
 	})
 }
 
 func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
+	// Pointer fields so absent keys leave the current value untouched.
 	var body struct {
-		QuarantineNewDevices bool `json:"quarantine_new_devices"`
+		QuarantineNewDevices *bool `json:"quarantine_new_devices"`
+		BlockLandingPage     *bool `json:"block_landing_page"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	s.devices.SetQuarantine(body.QuarantineNewDevices)
+	if body.QuarantineNewDevices != nil {
+		s.devices.SetQuarantine(*body.QuarantineNewDevices)
+	}
+	if body.BlockLandingPage != nil {
+		s.devices.SetBlockLanding(*body.BlockLandingPage)
+	}
 	_ = s.devices.FlushIfDirty()
 	s.kick()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"quarantine_new_devices": s.devices.Quarantine(),
+		"block_landing_page":     s.devices.BlockLanding(),
 	})
 }
 

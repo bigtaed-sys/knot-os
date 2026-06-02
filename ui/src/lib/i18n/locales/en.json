@@ -122,6 +122,8 @@
 		"hours": "hours",
 		"quarantine": "Quarantine",
 		"quarantine_help": "New devices get no internet until you approve them. Current devices are approved automatically.",
+		"landing": "Landing page",
+		"landing_help": "A blocked device sees an explanatory page (paused / awaiting approval / blocked) on any site it opens. Pops up automatically.",
 		"pending_approval": "Pending approval",
 		"pending_count": "{n} pending approval",
 		"approve": "Approve",

@@ -422,18 +422,19 @@ type ghRelease struct {
 	} `json:"assets"`
 }
 
-// isNewer compares two version strings of the form "vX.Y.Z" or
-// "X.Y.Z" (with optional "-suffix"). Returns true iff `latest` is
-// strictly greater than `current`. Falls back to plain string
-// inequality on parse failure — better to surface "different" than
-// to silently swallow a malformed tag.
+// isNewer compares two CalVer strings "vYEAR.MONTH.RELEASE[-PATCH]"
+// (the leading "v" optional). Returns true iff `latest` is strictly
+// greater than `current`, comparing the patch suffix too so that
+// e.g. 2026.06.13-2 > 2026.06.13-1 > 2026.06.13. Falls back to plain
+// string inequality on parse failure — better to surface "different"
+// than to silently swallow a malformed tag.
 func isNewer(latest, current string) bool {
 	la := parseVersion(latest)
 	cu := parseVersion(current)
 	if la == nil || cu == nil {
 		return strings.TrimPrefix(latest, "v") != strings.TrimPrefix(current, "v")
 	}
-	for i := 0; i < 3; i++ {
+	for i := range la { // 4 components: year, month, release, patch
 		if la[i] != cu[i] {
 			return la[i] > cu[i]
 		}
@@ -441,17 +442,26 @@ func isNewer(latest, current string) bool {
 	return false
 }
 
+// parseVersion splits "vYEAR.MONTH.RELEASE[-PATCH]" into four ints
+// {year, month, release, patch}. A non-numeric suffix (a dev build
+// like "-dev-abc") yields patch 0, so a dev build compares equal to
+// the bare release. Returns nil on a malformed base triple.
 func parseVersion(s string) []int {
 	s = strings.TrimPrefix(s, "v")
+	patch := 0
 	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		patch = leadingInt(s[i+1:])
 		s = s[:i]
 	}
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
 		return nil
 	}
-	out := make([]int, 3)
+	out := make([]int, 4)
 	for i, p := range parts {
+		if p == "" {
+			return nil
+		}
 		n := 0
 		for _, c := range p {
 			if c < '0' || c > '9' {
@@ -461,5 +471,19 @@ func parseVersion(s string) []int {
 		}
 		out[i] = n
 	}
+	out[3] = patch
 	return out
+}
+
+// leadingInt parses the leading run of digits in s ("2" → 2, "2-dev"
+// → 2, "dev" → 0).
+func leadingInt(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }

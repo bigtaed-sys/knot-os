@@ -242,6 +242,52 @@ func listenPort(addr string) int {
 	return 80
 }
 
+// captiveFunc adapts a plain function to dns.CaptiveLookup.
+type captiveFunc func(net.IP) (net.IP, bool)
+
+func (f captiveFunc) CaptiveIP(ip net.IP) (net.IP, bool) { return f(ip) }
+
+// landingHTML is the self-contained page a blocked device sees. reason
+// is "pending" (awaiting quarantine approval), "paused", or "blocked"
+// (schedule). Bilingual RU/EN since it's shown on the client's own
+// browser with no locale hint.
+func landingHTML(reason string) []byte {
+	icon, ruTitle, ruBody, enTitle, enBody := "bi", "", "", "", ""
+	switch reason {
+	case "pending":
+		icon = "⏳"
+		ruTitle, ruBody = "Ожидает одобрения", "Это устройство новое в сети. Администратор должен одобрить его, прежде чем появится интернет."
+		enTitle, enBody = "Awaiting approval", "This device is new to the network. An administrator must approve it before it gets internet."
+	case "paused":
+		icon = "⏸️"
+		ruTitle, ruBody = "Интернет на паузе", "Доступ в интернет для этого устройства приостановлен. Он возобновится автоматически или когда администратор снимет паузу."
+		enTitle, enBody = "Internet paused", "Internet access for this device is paused. It will resume automatically, or when the administrator lifts the pause."
+	default:
+		icon = "🚫"
+		ruTitle, ruBody = "Интернет заблокирован", "Доступ в интернет для этого устройства сейчас заблокирован по расписанию."
+		enTitle, enBody = "Internet blocked", "Internet access for this device is currently blocked by a schedule."
+	}
+	return []byte(fmt.Sprintf(`<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>%s — KnotOS</title>
+<style>
+ html,body{height:100%%;margin:0}
+ body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:grid;place-items:center;padding:1.5rem}
+ .card{max-width:30rem;text-align:center;background:#1e293b;border:1px solid #334155;border-radius:18px;padding:2.5rem 2rem}
+ .ico{font-size:3rem;line-height:1}
+ h1{font-size:1.5rem;margin:1rem 0 .25rem}
+ .en h1{font-size:1.05rem;color:#94a3b8;font-weight:600;margin-top:.25rem}
+ p{color:#cbd5e1;line-height:1.5;margin:.5rem 0}
+ .en p{color:#94a3b8;font-size:.9rem}
+ .brand{margin-top:1.5rem;color:#64748b;font-size:.8rem;letter-spacing:.03em}
+ hr{border:0;border-top:1px solid #334155;margin:1.25rem 0}
+</style></head><body><div class=card>
+ <div class=ico>%s</div>
+ <h1>%s</h1><p>%s</p>
+ <hr><div class=en><h1>%s</h1><p>%s</p></div>
+ <div class=brand>KnotOS</div>
+</div></body></html>`, ruTitle, icon, ruTitle, ruBody, enTitle, enBody))
+}
+
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 var Version = "0.0.0-dev"
 
@@ -447,11 +493,60 @@ func main() {
 	// derived from the current role (empty in setup mode where
 	// dnsmasq's own DNS catch-all owns port 53; gateway:53 in
 	// wifi-extender mode where dnsmasq is configured port=0).
+	// LAN gateway used as the captive landing target. Read once at
+	// startup (matches the bandwidth sampler's convention); a LAN-CIDR
+	// change is picked up on next boot.
+	captiveGW := ""
+	if cfg.Network.LAN != nil {
+		captiveGW = firstUsableIPv4(cfg.Network.LAN.CIDR)
+	}
+	// deviceBlockReason reports why a source IP is currently denied the
+	// internet (and whether it is). Shared by the DNS captive redirect
+	// and the HTTP landing page so both agree.
+	deviceBlockReason := func(ip string) (string, bool) {
+		if ip == "" {
+			return "", false
+		}
+		var dev deviceregistry.Device
+		found := false
+		for _, d := range devices.List() {
+			if d.IP == ip {
+				dev, found = d, true
+				break
+			}
+		}
+		if !found {
+			return "", false
+		}
+		now := time.Now()
+		if devices.Quarantine() && !dev.Approved {
+			return "pending", true
+		}
+		if dev.Paused(now) {
+			return "paused", true
+		}
+		if dev.ProfileID != "" {
+			if p, ok := profiles.Get(dev.ProfileID); ok && p.IsBlockingAt(now) {
+				return "blocked", true
+			}
+		}
+		return "", false
+	}
+
 	dnsMode, dnsUpstreams := dnsUpstreamFromConfig(cfg)
 	dnsServer := knotdns.New(knotdns.Options{
 		Listen:       dnsListenForRole(cfg, *dev),
 		Blocklists:   dnsBlocklists,
 		Devices:      dnsDeviceLookup{devices: devices, profiles: profiles},
+		Captive: captiveFunc(func(srcIP net.IP) (net.IP, bool) {
+			if !devices.BlockLanding() || captiveGW == "" {
+				return nil, false
+			}
+			if _, blocked := deviceBlockReason(srcIP.String()); blocked {
+				return net.ParseIP(captiveGW), true
+			}
+			return nil, false
+		}),
 		Log:          dnsLog,
 		Cache:        dnsCache,
 		UpstreamMode: dnsMode,
@@ -1073,6 +1168,18 @@ func main() {
 	srv := httpserver.New(srvOpts)
 	srv.Mount("/api", apiSrv.Handler())
 	srv.SetRedirectHTTPS(shouldRedirectHTTPS(cfg, *dev, tlsActive))
+	// Blocked-device landing: serve the explanatory page to any client
+	// that's currently denied the internet (and has the landing on).
+	srv.SetBlockedPageFn(func(ip string) ([]byte, bool) {
+		if !devices.BlockLanding() {
+			return nil, false
+		}
+		reason, blocked := deviceBlockReason(ip)
+		if !blocked {
+			return nil, false
+		}
+		return landingHTML(reason), true
+	})
 
 	// Single config-applied callback wires every effect a role
 	// transition has to ripple through:

@@ -33,6 +33,12 @@ type Registry struct {
 	// store doc.
 	quarantine bool
 
+	// blockLanding, when true, makes blocked devices (paused, awaiting
+	// approval, or schedule-blocked) land on an explanatory page: their
+	// DNS is captive-redirected to the router, which serves a "blocked"
+	// / "awaiting approval" page that any site triggers. Persisted.
+	blockLanding bool
+
 	// dirty flags whether in-memory state has diverged from storeFile.
 	// Cleared after a successful Flush.
 	dirty bool
@@ -194,6 +200,21 @@ func (r *Registry) SetQuarantine(on bool) {
 	r.dirty = true
 }
 
+// BlockLanding reports whether the blocked-device landing page is on.
+func (r *Registry) BlockLanding() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.blockLanding
+}
+
+// SetBlockLanding toggles the blocked-device landing page.
+func (r *Registry) SetBlockLanding(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.blockLanding = on
+	r.dirty = true
+}
+
 // Reset wipes the entire registry — both the in-memory map and
 // the on-disk YAML store. Used at setup-completion time: every
 // device the registry saw before the wizard finished was a
@@ -309,6 +330,7 @@ func (r *Registry) Load() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.quarantine = doc.QuarantineNewDevices
+	r.blockLanding = doc.BlockLandingPage
 	for _, d := range doc.Devices {
 		mac := normalizeMAC(d.MAC)
 		if mac == "" {
@@ -327,7 +349,7 @@ func (r *Registry) Load() error {
 // fields (IP, LeaseExpires) are not persisted.
 func (r *Registry) Save() error {
 	r.mu.RLock()
-	doc := storeDoc{QuarantineNewDevices: r.quarantine, Devices: make([]Device, 0, len(r.devices))}
+	doc := storeDoc{QuarantineNewDevices: r.quarantine, BlockLandingPage: r.blockLanding, Devices: make([]Device, 0, len(r.devices))}
 	for _, d := range r.devices {
 		doc.Devices = append(doc.Devices, Device{
 			MAC:         d.MAC,
@@ -394,6 +416,7 @@ func (r *Registry) FlushIfDirty() error {
 
 type storeDoc struct {
 	QuarantineNewDevices bool     `yaml:"quarantine_new_devices,omitempty"`
+	BlockLandingPage     bool     `yaml:"block_landing_page,omitempty"`
 	Devices              []Device `yaml:"devices"`
 }
 

@@ -139,6 +139,7 @@ export interface DevicesResponse {
 
 export interface AccessSettings {
 	quarantine_new_devices: boolean;
+	block_landing_page: boolean;
 }
 
 export interface BlockWindow {
