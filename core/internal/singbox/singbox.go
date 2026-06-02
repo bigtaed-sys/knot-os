@@ -246,6 +246,15 @@ func (c Config) RenderJSON() ([]byte, error) {
 			if len(r.SourceIPCIDR) == 0 {
 				continue
 			}
+			// Split-tunnel rules (domain-scoped) leave the bulk of the
+			// device's traffic direct, so its DNS must stay direct too;
+			// SNI sniffing routes the tunnelled domains without needing
+			// the resolver on the tunnel. Forcing "remote" here would
+			// push every lookup through the tunnel for a device that
+			// only wants a few domains tunnelled.
+			if len(r.DomainSuffix) > 0 {
+				continue
+			}
 			dnsRules = append(dnsRules, map[string]any{
 				"source_ip_cidr": r.SourceIPCIDR,
 				"server":         "remote",

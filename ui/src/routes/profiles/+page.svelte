@@ -56,6 +56,7 @@
 			description: '',
 			block_windows: [],
 			dns_blocklists: [],
+			safe_search: false,
 			builtin: false
 		};
 	}
@@ -73,7 +74,12 @@
 				name: editing.name,
 				description: editing.description ?? '',
 				block_windows: editing.block_windows ?? [],
-				dns_blocklists: editing.dns_blocklists ?? []
+				dns_blocklists: editing.dns_blocklists ?? [],
+				safe_search: editing.safe_search ?? false,
+				// Preserve routing assignment (managed on the VPN page) so
+				// editing a profile here doesn't silently clear its tunnel.
+				route_via: editing.route_via ?? '',
+				route_domains: editing.route_domains ?? []
 			};
 			await apiPut(`/profiles/${encodeURIComponent(editing.id)}`, payload);
 			savedFlash = true;
@@ -237,6 +243,23 @@
 					<p class="help">{$_('profiles.blocklists_help')}</p>
 				</div>
 
+				<div>
+					<label class="flex items-start gap-2.5 cursor-pointer">
+						<input
+							type="checkbox"
+							class="rounded text-brand-600 mt-0.5"
+							bind:checked={editing.safe_search}
+						/>
+						<span>
+							<span class="label !mb-0 flex items-center gap-2">
+								<i class="bi bi-search-heart text-brand-600 dark:text-brand-300"></i>
+								{$_('profiles.safesearch_label')}
+							</span>
+							<span class="help block">{$_('profiles.safesearch_help')}</span>
+						</span>
+					</label>
+				</div>
+
 				{#if error}
 					<div class="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
 						<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
@@ -305,6 +328,18 @@
 									<span class="badge badge-info">
 										<i class="bi bi-funnel"></i>
 										{p.dns_blocklists.join(', ')}
+									</span>
+								{/if}
+								{#if p.safe_search}
+									<span class="badge badge-info">
+										<i class="bi bi-search-heart"></i>
+										{$_('profiles.safesearch_badge')}
+									</span>
+								{/if}
+								{#if p.route_via && p.route_domains && p.route_domains.length > 0}
+									<span class="badge badge-neutral">
+										<i class="bi bi-signpost-split"></i>
+										{$_('profiles.split_badge', { values: { n: p.route_domains.length } })}
 									</span>
 								{/if}
 							</div>

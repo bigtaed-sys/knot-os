@@ -4,6 +4,22 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.14] — 2026-06-02
+
+Theme: **"Sharper control over traffic"** — three network features the daemon had the plumbing for but no surface to use.
+
+### Per-domain split tunnel (VPN)
+
+- A profile that routes through a tunnel can now do so **only for chosen domains** instead of the whole device. On the VPN page each assigned profile gets a **Split** button: paste `youtube.com`, `netflix.com`, … and only traffic to those domains (matched by sniffed SNI) takes the tunnel — everything else stays direct, at full speed. Empty list = the previous whole-device behaviour. Split devices keep direct DNS (no forced tunnel resolver), and a missing server still kill-switches the matched domains rather than leaking them. New device status badge: **Split**.
+
+### SafeSearch enforcement (profiles)
+
+- A per-profile **Force SafeSearch** toggle. The resolver CNAME-rewrites Google (incl. all country TLDs), Bing, DuckDuckGo and YouTube to the providers' own enforcement hosts (`forcesafesearch.google.com`, `restrict.youtube.com`, …) for devices on that profile — no client config, works over plain DNS. HTTPS/SVCB lookups get NODATA so browsers fall back to the rewritten address. Pairs naturally with the existing schedule + ad-block in the kids profile.
+
+### Inbound port forwarding (router mode)
+
+- A new **Port forwarding** page: map a WAN port to a LAN device (`tcp`/`udp`/both), optional different internal port, per-rule enable toggle, with a device-IP autocomplete. Renders as nftables `prerouting` DNAT + a scoped forward-accept in the router ruleset; duplicate `(proto, port)` pairs are rejected. Changes go through the transactional apply path (snapshot + health-check + auto-rollback). Saved-but-inactive with a notice when not in router mode (the extender has no WAN of its own).
+
 ## [2026.06.13-3] — 2026-06-02
 
 ### Fixed

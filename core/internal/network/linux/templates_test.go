@@ -3,6 +3,8 @@ package linux
 import (
 	"strings"
 	"testing"
+
+	"github.com/knot-os/knot-os/core/internal/config"
 )
 
 func TestHostapdOpenNetwork(t *testing.T) {
@@ -165,6 +167,44 @@ func TestNftablesRouterIsolatesGuestBSS(t *testing.T) {
 		// Guest source IPs masqueraded out the WAN.
 		`ip saddr 192.168.43.0/24 oifname "eth0" masquerade`,
 	)
+}
+
+func TestNftablesRouterPortForwards(t *testing.T) {
+	out := BuildNftablesRouter(RouterNftablesParams{
+		WANInterface: "eth0",
+		LANInterface: "wlan0",
+		LANCIDR:      "192.168.42.0/24",
+		PortForwards: []config.PortForward{
+			{ID: "game", Proto: "tcp", WANPort: 25565, DestIP: "192.168.42.50", Enabled: true},
+			{ID: "dns", Proto: "tcp/udp", WANPort: 5353, DestIP: "192.168.42.51", DestPort: 53, Enabled: true},
+			{ID: "off", Proto: "tcp", WANPort: 9999, DestIP: "192.168.42.99", Enabled: false},
+		},
+	})
+	mustContain(t, out,
+		"chain prerouting",
+		"type nat hook prerouting priority dstnat",
+		// Single-proto rule, dest port defaults to WAN port.
+		`iifname "eth0" tcp dport 25565 dnat to 192.168.42.50:25565`,
+		`iifname "eth0" ip daddr 192.168.42.50 tcp dport 25565 ct state new,established,related accept`,
+		// tcp/udp expands to both, explicit dest port.
+		`iifname "eth0" tcp dport 5353 dnat to 192.168.42.51:53`,
+		`iifname "eth0" udp dport 5353 dnat to 192.168.42.51:53`,
+	)
+	// Disabled rule must not appear.
+	if strings.Contains(out, "9999") {
+		t.Errorf("disabled port forward leaked into ruleset:\n%s", out)
+	}
+}
+
+func TestNftablesRouterNoPortForwardChainWhenEmpty(t *testing.T) {
+	out := BuildNftablesRouter(RouterNftablesParams{
+		WANInterface: "eth0",
+		LANInterface: "wlan0",
+		LANCIDR:      "192.168.42.0/24",
+	})
+	if strings.Contains(out, "chain prerouting") {
+		t.Errorf("prerouting chain emitted with no port forwards:\n%s", out)
+	}
 }
 
 func TestHostapdConfWithGuestBSS(t *testing.T) {

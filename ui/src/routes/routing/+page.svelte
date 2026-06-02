@@ -79,6 +79,46 @@
 
 	let pickingFor = $state<Profile | null>(null);
 
+	// Split-tunnel domain editor state.
+	let splitFor = $state<Profile | null>(null);
+	let splitText = $state('');
+	let splitBusy = $state(false);
+	let splitError = $state<string | null>(null);
+
+	function openSplit(p: Profile) {
+		splitFor = p;
+		splitText = (p.route_domains ?? []).join('\n');
+		splitError = null;
+	}
+
+	function parseDomains(text: string): string[] {
+		return text
+			.split(/[\s,]+/)
+			.map((s) => s.trim().toLowerCase())
+			.filter((s) => s.length > 0);
+	}
+
+	async function saveSplit() {
+		if (!splitFor) return;
+		splitBusy = true;
+		splitError = null;
+		try {
+			const domains = parseDomains(splitText);
+			await apiPut(`/profiles/${splitFor.id}`, { ...splitFor, route_domains: domains });
+			splitFor = null;
+			await load(false);
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				splitError = body?.error?.message ?? e.message;
+			} else {
+				splitError = e instanceof Error ? e.message : String(e);
+			}
+		} finally {
+			splitBusy = false;
+		}
+	}
+
 	let timer: ReturnType<typeof setInterval> | null = null;
 
 	// --- loaders ---------------------------------------------------------------
@@ -272,6 +312,12 @@
 					label: $_('routing.status_tunnel'),
 					cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400',
 					icon: 'bi-shield-lock-fill'
+				};
+			case 'split':
+				return {
+					label: $_('routing.status_split'),
+					cls: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400',
+					icon: 'bi-signpost-split-fill'
 				};
 			case 'kill':
 				return {
@@ -500,8 +546,24 @@
 								{:else}
 									<span>{$_('routing.server_direct')}</span>
 								{/if}
+								{#if p.route_via && p.route_domains && p.route_domains.length > 0}
+									<span class="badge badge-info ml-1">
+										<i class="bi bi-signpost-split"></i>
+										{$_('routing.split_count', { values: { n: p.route_domains.length } })}
+									</span>
+								{/if}
 							</div>
 						</div>
+						{#if p.route_via}
+							<button
+								class="btn btn-ghost text-sm py-1 px-3"
+								onclick={() => openSplit(p)}
+								title={$_('routing.split_help')}
+							>
+								<i class="bi bi-signpost-split"></i>
+								{$_('routing.split_button')}
+							</button>
+						{/if}
 						<button class="btn btn-ghost text-sm py-1 px-3" onclick={() => (pickingFor = p)}>
 							{$_('routing.server_pick')}
 						</button>
@@ -721,6 +783,45 @@
 			<div class="flex justify-end mt-4">
 				<button class="btn btn-ghost" onclick={() => (pickingFor = null)}>
 					{$_('common.cancel')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Split-tunnel domains editor -->
+{#if splitFor}
+	<div
+		class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) splitFor = null;
+		}}
+	>
+		<div class="surface p-5 max-w-lg w-full">
+			<h2 class="text-lg font-semibold mb-1">
+				{$_('routing.split_title', { values: { profile: splitFor.name } })}
+			</h2>
+			<p class="text-sm text-zinc-500 mb-4">{$_('routing.split_modal_help')}</p>
+			<textarea
+				bind:value={splitText}
+				placeholder={'youtube.com\nnetflix.com\nopenai.com'}
+				class="input font-mono text-sm h-40"
+			></textarea>
+			<p class="help mt-1">{$_('routing.split_empty_help')}</p>
+			{#if splitError}
+				<div class="text-xs text-red-600 mt-2">{splitError}</div>
+			{/if}
+			<div class="flex justify-end gap-2 mt-4">
+				<button class="btn btn-ghost" onclick={() => (splitFor = null)} disabled={splitBusy}>
+					{$_('common.cancel')}
+				</button>
+				<button class="btn btn-primary" onclick={saveSplit} disabled={splitBusy}>
+					{#if splitBusy}
+						<span class="spinner"></span>{$_('common.saving')}
+					{:else}
+						{$_('common.save')}
+					{/if}
 				</button>
 			</div>
 		</div>

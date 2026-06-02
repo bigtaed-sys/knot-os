@@ -158,6 +158,10 @@ export interface Profile {
 	block_windows?: BlockWindow[];
 	dns_blocklists?: string[];
 	route_via?: string;
+	/** When non-empty (with route_via set), only these domain suffixes tunnel — split routing. */
+	route_domains?: string[];
+	/** Force search engines / YouTube into safe mode for devices on this profile. */
+	safe_search?: boolean;
 	builtin: boolean;
 }
 
@@ -391,11 +395,29 @@ export interface SubscriptionRefreshResponse {
 export interface RoutingDevice {
 	mac: string;
 	outbound: string;
-	status: 'direct' | 'tunnel' | 'kill';
+	status: 'direct' | 'tunnel' | 'kill' | 'split';
 	profile_id: string;
 }
 
 export interface RoutingResponse {
 	devices: RoutingDevice[];
 	missing_outbounds: string[];
+}
+
+// --- Port forwarding ------------------------------------------------------
+
+export interface PortForward {
+	id: string;
+	description?: string;
+	proto: 'tcp' | 'udp' | 'tcp/udp';
+	wan_port: number;
+	dest_ip: string;
+	dest_port?: number;
+	enabled: boolean;
+}
+
+export interface PortForwardsResponse {
+	port_forwards: PortForward[];
+	/** False when the router has no WAN of its own (extender role) — forwards won't take effect. */
+	router_mode: boolean;
 }

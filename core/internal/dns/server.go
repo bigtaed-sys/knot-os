@@ -23,6 +23,10 @@ var (
 // has no upward dependencies.
 type DeviceLookup interface {
 	BlocklistsForIP(ip net.IP) (mac string, blocklists []string, ok bool)
+	// SafeSearchForIP reports whether the device at ip is on a
+	// profile that enforces SafeSearch. Checked per query on the hot
+	// path, so the implementation should be cheap.
+	SafeSearchForIP(ip net.IP) bool
 }
 
 // CaptiveLookup decides, per source IP, whether the device should be
@@ -43,6 +47,8 @@ type nopLookup struct{}
 func (nopLookup) BlocklistsForIP(_ net.IP) (string, []string, bool) {
 	return "", nil, false
 }
+
+func (nopLookup) SafeSearchForIP(_ net.IP) bool { return false }
 
 // QueryEvent is what the resolver emits to the optional QueryLog after
 // each request. Fields are intentionally narrow so a high-traffic LAN
@@ -330,6 +336,22 @@ func (s *Server) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 		return
 	}
 
+	// SafeSearch: rewrite the major search engines / YouTube to their
+	// enforcement hostnames for devices whose profile enables it.
+	// Checked before the cache because the cache is shared across
+	// devices and the rewrite is per-profile.
+	if s.opts.Devices.SafeSearchForIP(srcIP) {
+		if target, ok := safeSearchTarget(qname); ok {
+			s.replySafeSearch(w, r, target)
+			s.opts.Log.Append(QueryEvent{
+				When: time.Now(), SrcMAC: mac, SrcIP: srcIP.String(),
+				QName: qname, QType: mdns.TypeToString[q.Qtype],
+				Blocked: true, BlockedBy: "safesearch",
+			})
+			return
+		}
+	}
+
 	if cached, ok := s.opts.Cache.Get(r); ok {
 		if err := w.WriteMsg(cached); err != nil {
 			s.opts.Logger.Printf("dns: write cached reply: %v", err)
@@ -430,6 +452,33 @@ func (s *Server) replyCaptive(w mdns.ResponseWriter, r *mdns.Msg, ip net.IP) {
 	}
 	// AAAA / HTTPS / etc. → NOERROR with no answer (NODATA), so the
 	// client falls back to the captive A record.
+	_ = w.WriteMsg(resp)
+}
+
+// replySafeSearch answers a search-engine query with a CNAME to the
+// provider's enforcement host plus that host's resolved addresses.
+// A/AAAA queries get the CNAME + forwarded answers; HTTPS/SVCB and
+// everything else get NODATA so the client falls back to A/AAAA.
+func (s *Server) replySafeSearch(w mdns.ResponseWriter, r *mdns.Msg, target string) {
+	q := r.Question[0]
+	resp := new(mdns.Msg)
+	resp.SetReply(r)
+	resp.Authoritative = true
+
+	if q.Qtype == mdns.TypeA || q.Qtype == mdns.TypeAAAA {
+		if cn, err := mdns.NewRR(fmt.Sprintf("%s 300 IN CNAME %s.", q.Name, target)); err == nil {
+			resp.Answer = append(resp.Answer, cn)
+		}
+		// Resolve the enforcement host's addresses upstream and splice
+		// them in under the CNAME. Best-effort: on failure the client
+		// still gets the CNAME and re-queries the target itself.
+		probe := new(mdns.Msg)
+		probe.SetQuestion(mdns.Fqdn(target), q.Qtype)
+		probe.RecursionDesired = true
+		if up, err := s.forward(probe); err == nil && up != nil {
+			resp.Answer = append(resp.Answer, up.Answer...)
+		}
+	}
 	_ = w.WriteMsg(resp)
 }
 

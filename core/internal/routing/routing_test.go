@@ -98,6 +98,46 @@ func TestBuildTunnelProfileEmitsSourceRule(t *testing.T) {
 	}
 }
 
+func TestBuildSplitTunnelEmitsDomainScopedRule(t *testing.T) {
+	tag := "myprovider:srv001"
+	res, _ := Build(Inputs{
+		LANCIDR:   "192.168.42.0/24",
+		Outbounds: []singbox.Outbound{fakeOutbound(tag)},
+		Devices: []deviceregistry.Device{
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.50", ProfileID: "split"},
+		},
+		Profiles: []profile.Profile{
+			{ID: "split", Name: "Split", RouteVia: tag,
+				RouteDomains: []string{"YouTube.com", " netflix.com "}},
+		},
+	})
+	if len(res.Config.Routes) != 2 {
+		t.Fatalf("got %d routes, want 2", len(res.Config.Routes))
+	}
+	r := res.Config.Routes[1]
+	if len(r.SourceIPCIDR) != 1 || r.SourceIPCIDR[0] != "192.168.42.50/32" {
+		t.Errorf("SourceIPCIDR=%v", r.SourceIPCIDR)
+	}
+	// Domains must be lowercased + trimmed for the renderer.
+	if len(r.DomainSuffix) != 2 || r.DomainSuffix[0] != "youtube.com" || r.DomainSuffix[1] != "netflix.com" {
+		t.Errorf("DomainSuffix=%v", r.DomainSuffix)
+	}
+	if got := res.DeviceRoutes["aa:bb:cc:dd:ee:01"].Status; got != "split" {
+		t.Errorf("status=%q, want split", got)
+	}
+	js, err := res.Config.RenderJSON()
+	if err != nil {
+		t.Fatalf("RenderJSON: %v", err)
+	}
+	if !strings.Contains(string(js), `"domain_suffix"`) {
+		t.Errorf("domain_suffix not in rendered config\n%s", js)
+	}
+	// Split devices keep direct DNS — no per-source "remote" dns rule.
+	if strings.Contains(string(js), `"server": "remote"`) {
+		t.Errorf("split device should not get a remote DNS rule\n%s", js)
+	}
+}
+
 func TestBuildKillSwitchOnMissingServer(t *testing.T) {
 	res, _ := Build(Inputs{
 		LANCIDR: "192.168.42.0/24",

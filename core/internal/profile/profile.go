@@ -37,12 +37,25 @@ type Profile struct {
 	// looks them up against the global blocklist registry. Empty ==
 	// no DNS filtering (pass-through).
 	DNSBlocklists []string `yaml:"dns_blocklists,omitempty" json:"dns_blocklists,omitempty"`
+	// SafeSearch, when true, forces the major search engines and
+	// YouTube into their restricted/safe variants for devices on
+	// this profile. The resolver CNAME-rewrites queries for
+	// google.*, youtube.com, bing.com and duckduckgo.com to the
+	// providers' enforcement hostnames. Empty == off.
+	SafeSearch bool `yaml:"safe_search,omitempty" json:"safe_search,omitempty"`
 	// RouteVia, when non-empty, sends all traffic from devices on
 	// this profile through the named outbound. Format mirrors
 	// singbox.Outbound.Tag — usually "<sub-id>:<server-id>" for a
 	// concrete server, or "auto:<sub-id>" for a urltest selector.
 	// Empty == direct (no tunnel). M28+ feature.
 	RouteVia string `yaml:"route_via,omitempty" json:"route_via,omitempty"`
+	// RouteDomains turns RouteVia into a split tunnel: when non-empty,
+	// only traffic to these domains (and their subdomains) goes
+	// through the tunnel; everything else from the device stays
+	// direct. Empty (with RouteVia set) == the whole device is
+	// tunnelled. Ignored when RouteVia is empty/"direct".
+	// Entries are domain suffixes, e.g. "youtube.com", "netflix.com".
+	RouteDomains []string `yaml:"route_domains,omitempty" json:"route_domains,omitempty"`
 	// Builtin marks profiles that ship with KnotOS. The API refuses
 	// to delete or rename them; the user can only edit their
 	// schedule and blocklists.
@@ -67,6 +80,11 @@ type BlockWindow struct {
 var idRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 var hhmmRE = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
 
+// domainRE accepts a bare domain suffix like "youtube.com" or
+// "media-amazon.com" — lowercase labels separated by dots, no
+// scheme, no leading dot, no path.
+var domainRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
+
 // Validate reports an error if the profile is structurally bad.
 func (p Profile) Validate() error {
 	if !idRE.MatchString(p.ID) {
@@ -80,7 +98,28 @@ func (p Profile) Validate() error {
 			return fmt.Errorf("block_windows[%d]: %w", i, err)
 		}
 	}
+	for i, d := range p.RouteDomains {
+		if !domainRE.MatchString(strings.ToLower(strings.TrimSpace(d))) {
+			return fmt.Errorf("route_domains[%d]: %q is not a valid domain", i, d)
+		}
+	}
 	return nil
+}
+
+// NormalizedRouteDomains returns the route-domain suffixes lowercased
+// and trimmed, suitable for handing straight to the sing-box renderer.
+func (p Profile) NormalizedRouteDomains() []string {
+	if len(p.RouteDomains) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.RouteDomains))
+	for _, d := range p.RouteDomains {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // Validate checks a single window's structure.

@@ -55,6 +55,56 @@ func TestValidateRouterAccepts(t *testing.T) {
 	}
 }
 
+func validRouter() Config {
+	c := Default()
+	c.Role = RoleWiFiRouter
+	c.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+	c.Network.WAN = &WAN{Interface: "eth0", Mode: "dhcp"}
+	c.Network.AP = &WiFiAP{SSID: "knot-ap", Band: "2.4", Channel: 11}
+	c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+	return c
+}
+
+func TestValidatePortForwards(t *testing.T) {
+	good := validRouter()
+	good.Network.PortForwards = []PortForward{
+		{ID: "game", Proto: "tcp", WANPort: 25565, DestIP: "192.168.42.50", Enabled: true},
+		{ID: "dns", Proto: "tcp/udp", WANPort: 5353, DestIP: "192.168.42.51", DestPort: 53},
+	}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid port forwards rejected: %v", err)
+	}
+
+	bad := []struct {
+		name string
+		pf   PortForward
+		sub  string
+	}{
+		{"bad proto", PortForward{ID: "a", Proto: "icmp", WANPort: 80, DestIP: "192.168.42.5"}, "proto"},
+		{"port range", PortForward{ID: "a", Proto: "tcp", WANPort: 0, DestIP: "192.168.42.5"}, "wan_port"},
+		{"bad ip", PortForward{ID: "a", Proto: "tcp", WANPort: 80, DestIP: "not-an-ip"}, "dest_ip"},
+		{"bad id", PortForward{ID: "Bad ID", Proto: "tcp", WANPort: 80, DestIP: "192.168.42.5"}, "id"},
+	}
+	for _, tc := range bad {
+		c := validRouter()
+		c.Network.PortForwards = []PortForward{tc.pf}
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.sub) {
+			t.Errorf("%s: got err=%v, want substring %q", tc.name, err, tc.sub)
+		}
+	}
+
+	// Duplicate (proto, wan_port) is rejected.
+	dup := validRouter()
+	dup.Network.PortForwards = []PortForward{
+		{ID: "a", Proto: "tcp", WANPort: 443, DestIP: "192.168.42.5"},
+		{ID: "b", Proto: "tcp/udp", WANPort: 443, DestIP: "192.168.42.6"},
+	}
+	if err := dup.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("duplicate wan port should be rejected, got %v", err)
+	}
+}
+
 func TestValidateRejectsBadConfigs(t *testing.T) {
 	cases := []struct {
 		name    string

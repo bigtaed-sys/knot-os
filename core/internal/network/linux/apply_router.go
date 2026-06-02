@@ -237,6 +237,7 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		LANCIDR:        lan.CIDR,
 		GuestInterface: guestNftIface(guestBSS),
 		GuestCIDR:      guestNftCIDR(guestBSS),
+		PortForwards:   cfg.Network.PortForwards,
 	})
 	if err := b.applyNftables(ctx, rules); err != nil {
 		return fmt.Errorf("applyRouter: nftables: %w", err)

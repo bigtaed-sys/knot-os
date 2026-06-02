@@ -210,10 +210,22 @@ func Build(in Inputs) (Result, error) {
 			status = "kill"
 		}
 
-		cfg.Routes = append(cfg.Routes, singbox.RouteRule{
+		// Split tunnel: when the profile lists route domains, only
+		// those domains (matched by sniffed SNI) take the tunnel; the
+		// rest of the device's traffic falls through to direct. An
+		// empty list keeps the whole-device behaviour.
+		domains := p.NormalizedRouteDomains()
+		rule := singbox.RouteRule{
 			Outbound:     out,
 			SourceIPCIDR: []string{d.IP + "/32"},
-		})
+		}
+		if len(domains) > 0 {
+			rule.DomainSuffix = domains
+			if status == "tunnel" {
+				status = "split"
+			}
+		}
+		cfg.Routes = append(cfg.Routes, rule)
 		deviceRoutes[d.MAC] = DeviceRoute{
 			Outbound: out, Status: status, ProfileID: d.ProfileID,
 		}

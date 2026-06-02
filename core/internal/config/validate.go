@@ -49,7 +49,56 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("role: %q is not a known role", c.Role)
 	}
+	if err := c.Network.validatePortForwards(); err != nil {
+		return fmt.Errorf("network: %w", err)
+	}
 	return nil
+}
+
+// pfIDRE constrains port-forward IDs to URL-path-safe characters.
+var pfIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// validatePortForwards checks the inbound DNAT rules for structural
+// sanity and detects duplicate (proto, wan_port) pairs that would
+// produce ambiguous nftables rules.
+func (n Network) validatePortForwards() error {
+	seen := map[string]bool{}
+	for i, pf := range n.PortForwards {
+		if !pfIDRE.MatchString(pf.ID) {
+			return fmt.Errorf("port_forwards[%d].id %q is not valid", i, pf.ID)
+		}
+		switch pf.Proto {
+		case "tcp", "udp", "tcp/udp":
+		default:
+			return fmt.Errorf("port_forwards[%d].proto must be tcp, udp, or tcp/udp (got %q)", i, pf.Proto)
+		}
+		if pf.WANPort < 1 || pf.WANPort > 65535 {
+			return fmt.Errorf("port_forwards[%d].wan_port %d out of range 1..65535", i, pf.WANPort)
+		}
+		if pf.DestPort < 0 || pf.DestPort > 65535 {
+			return fmt.Errorf("port_forwards[%d].dest_port %d out of range 0..65535", i, pf.DestPort)
+		}
+		if ip := net.ParseIP(pf.DestIP); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("port_forwards[%d].dest_ip %q is not a valid IPv4 address", i, pf.DestIP)
+		}
+		// A (proto, wan_port) pair can only DNAT to one place.
+		for _, proto := range protoParts(pf.Proto) {
+			key := proto + ":" + fmt.Sprint(pf.WANPort)
+			if seen[key] {
+				return fmt.Errorf("port_forwards[%d]: duplicate %s port %d", i, proto, pf.WANPort)
+			}
+			seen[key] = true
+		}
+	}
+	return nil
+}
+
+// protoParts expands "tcp/udp" into both, or returns the single proto.
+func protoParts(proto string) []string {
+	if proto == "tcp/udp" {
+		return []string{"tcp", "udp"}
+	}
+	return []string{proto}
 }
 
 // validateRouter shares the AP/LAN constraints with the extender

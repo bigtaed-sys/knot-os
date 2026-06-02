@@ -221,6 +221,25 @@ func (d dnsDeviceLookup) BlocklistsForIP(ip net.IP) (string, []string, bool) {
 	return "", nil, false
 }
 
+// SafeSearchForIP reports whether the device leasing ip is on a
+// profile that enforces SafeSearch.
+func (d dnsDeviceLookup) SafeSearchForIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	target := ip.String()
+	for _, dev := range d.devices.List() {
+		if dev.IP == target {
+			if dev.ProfileID == "" {
+				return false
+			}
+			p, ok := d.profiles.Get(dev.ProfileID)
+			return ok && p.SafeSearch
+		}
+	}
+	return false
+}
+
 // listenPort returns the numeric port from a listen address like ":80"
 // or "127.0.0.1:8080". Used by LinuxBackend to set up captive-portal
 // DNAT rules pointing at knotd.

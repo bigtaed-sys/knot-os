@@ -43,6 +43,13 @@ type RouteRule struct {
 	// each LAN device's static-leased /32 lands here.
 	SourceIPCIDR []string
 
+	// DomainSuffix matches the sniffed destination domain (SNI for
+	// TLS, Host for HTTP, QUIC ALPN). Combined with SourceIPCIDR it
+	// expresses split-tunnelling: "for this device, only these
+	// domains go via the tunnel". Requires sniff on the inbound,
+	// which the TUN inbound always enables.
+	DomainSuffix []string
+
 	// SourcePort matches the L4 source port. Rare in our use case
 	// (mostly for DNS pinning when source is :53).
 	SourcePort []int
@@ -73,6 +80,9 @@ func (r RouteRule) toJSON() (map[string]any, error) {
 	}
 	if len(r.SourceIPCIDR) > 0 {
 		out["source_ip_cidr"] = r.SourceIPCIDR
+	}
+	if len(r.DomainSuffix) > 0 {
+		out["domain_suffix"] = r.DomainSuffix
 	}
 	if len(r.SourcePort) > 0 {
 		out["source_port"] = r.SourcePort

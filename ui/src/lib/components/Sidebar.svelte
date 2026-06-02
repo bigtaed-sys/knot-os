@@ -27,6 +27,7 @@
 		{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
 		{ path: '/routing', icon: 'bi-globe-americas', label: 'nav.routing' },
 		{ path: '/vpn', icon: 'bi-key', label: 'nav.vpn' },
+		{ path: '/portforwards', icon: 'bi-box-arrow-in-right', label: 'nav.portforward' },
 		{ path: '/guests', icon: 'bi-people', label: 'nav.guests' },
 		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
