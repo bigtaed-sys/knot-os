@@ -12,9 +12,9 @@ Theme: **"Plugins that actually run"**. The plugin system graduates from metadat
 
 - **Enabled plugins run as supervised subprocesses.** knotd starts a plugin's process when enabled, stops it when disabled, restarts it with capped backoff on crash, and brings enabled plugins back up at boot. Runtime state (running / crashed / stopped, restart count, last error) is surfaced on the Plugins page.
 - **HTTP-over-Unix-socket contract**, language-agnostic. A plugin listens on `KNOT_PLUGIN_SOCKET`; knotd reverse-proxies it (auth-gated) at `/api/plugins/<id>/proxy/` and the UI opens it in an iframe at `/plugins/<id>`.
-- **Permissioned host API.** Plugins call back into knotd over `KNOT_HOST_SOCKET` with a per-plugin bearer token; each endpoint (`/host/v1/{whoami,status,devices}`) is gated by a permission the plugin declares in its manifest, so a plugin only reaches what it asked for.
+- **Permissioned host API.** Plugins call back into knotd over `KNOT_HOST_SOCKET` with a per-plugin bearer token; each endpoint is gated by a permission the plugin declares in its manifest, so a plugin only reaches what it asked for. Read state (`/host/v1/{whoami,status,devices}`), **write** (`POST /host/v1/devices/{mac}/profile` under `devices:write` — reassigns a device, same scheduler-kick + routing-rebuild + bus event as the LAN UI), and **react** (`GET /host/v1/events` under `events:read` — a Server-Sent Events stream of router events: device joined, WAN up/down, profile changed, …).
 - **Manifest v2**: `exec` (argv to launch) + `permissions`, fully backward-compatible — a manifest without `exec` stays a metadata-only plugin.
-- **Reference plugin** `example-hello` rewritten as a real, dependency-free Go process that renders live router state pulled through the host API. The image build now compiles bundled Go plugins for arm64 and ships only the manifest + binary. Contract documented in [docs/plugin-api.md](docs/plugin-api.md).
+- **Reference plugin** `example-hello` rewritten as a real, dependency-free Go process that renders live router state pulled through the host API and a live feed of router events streamed from `/host/v1/events`. The image build now compiles bundled Go plugins for arm64 and ships only the manifest + binary. Contract documented in [docs/plugin-api.md](docs/plugin-api.md).
 
 ## [2026.06.5] — 2026-06-02
 

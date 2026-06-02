@@ -14,6 +14,7 @@ exec:
 permissions:
   - status:read
   - devices:read
+  - events:read
 
 menu:
   - path: /plugins/example-hello

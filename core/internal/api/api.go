@@ -22,6 +22,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
+	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/applycoord"
@@ -51,6 +52,7 @@ type Server struct {
 	pluginSup       pluginRuntime
 	pluginSync      func() // reconcile running processes after a toggle
 	pluginRTs       sync.Map // socket path → *http.Transport (proxy reuse)
+	eventBus        *events.Bus
 	devices         *deviceregistry.Registry
 	profiles        *profile.Registry
 	dns             *dnsServices

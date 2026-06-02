@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 )
 
@@ -49,6 +52,9 @@ func (s *Server) HostAPIHandler() http.Handler {
 	r.Get("/host/v1/whoami", s.hostWhoami)
 	r.With(s.requirePerm("status:read")).Get("/host/v1/status", s.hostStatus)
 	r.With(s.requirePerm("devices:read")).Get("/host/v1/devices", s.hostDevices)
+	// Write + reactive scopes (M2).
+	r.With(s.requirePerm("devices:write")).Post("/host/v1/devices/{mac}/profile", s.hostSetDeviceProfile)
+	r.With(s.requirePerm("events:read")).Get("/host/v1/events", s.hostEvents)
 	return r
 }
 
@@ -110,6 +116,81 @@ func (s *Server) hostStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// hostSetDeviceProfile lets a plugin reassign a device to a profile —
+// the write counterpart of /host/v1/devices. Same effects as the LAN
+// UI: scheduler kick + routing rebuild + a bus event.
+func (s *Server) hostSetDeviceProfile(w http.ResponseWriter, r *http.Request) {
+	mac := macParam(r)
+	var body struct {
+		ProfileID string `json:"profile_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	updated, err := s.applyDeviceProfile(mac, body.ProfileID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "device_not_found", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
+}
+
+// hostEvents streams router events to a plugin as Server-Sent Events.
+// The plugin subscribes once and reacts to device-joined, WAN
+// up/down, profile changes, etc. A heartbeat comment keeps the
+// connection from idling out; the subscription is dropped when the
+// plugin disconnects.
+func (s *Server) hostEvents(w http.ResponseWriter, r *http.Request) {
+	if s.eventBus == nil {
+		writeError(w, http.StatusServiceUnavailable, "events_disabled", "event bus not configured")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "no_streaming", "response writer does not support streaming")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	// Bounded buffer: a slow plugin drops events rather than blocking
+	// the bus (each bus dispatch is its own goroutine, but we don't
+	// want them piling up if the plugin stalls).
+	ch := make(chan events.Event, 64)
+	subID := s.eventBus.Subscribe(func(_ context.Context, ev events.Event) {
+		select {
+		case ch <- ev:
+		default:
+		}
+	})
+	defer s.eventBus.Unsubscribe(subID)
+
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case ev := <-ch:
+			payload, _ := json.Marshal(map[string]any{
+				"kind":    ev.Kind,
+				"when":    ev.When,
+				"payload": ev.Payload,
+			})
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, payload)
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *Server) hostDevices(w http.ResponseWriter, _ *http.Request) {

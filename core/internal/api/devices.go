@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
+	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/wol"
 )
 
@@ -126,6 +128,8 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	prev, _ := s.devices.Get(mac)
+	oldProfileID := prev.ProfileID
 	updated, err := s.devices.Update(mac, func(d *deviceregistry.Device) {
 		if body.DisplayName != nil {
 			d.DisplayName = *body.DisplayName
@@ -159,8 +163,7 @@ func (s *Server) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 	// Without this the device's traffic keeps going direct until
 	// the next full config-apply or reboot.
 	if body.ProfileID != nil {
-		s.kick()
-		s.fireConfigApplied(s.Snapshot())
+		s.onDeviceProfileChanged(updated, oldProfileID)
 	}
 
 	writeJSON(w, http.StatusOK, toJSON(updated, time.Now()))
@@ -240,6 +243,50 @@ func (s *Server) handleWakeDevice(w http.ResponseWriter, r *http.Request) {
 		"mac":       d.MAC,
 		"broadcast": bcast,
 	})
+}
+
+// SetEventBus wires the in-process event bus so API-driven state
+// changes (and the host-API event stream) can publish/observe events.
+func (s *Server) SetEventBus(b *events.Bus) { s.eventBus = b }
+
+// onDeviceProfileChanged runs the side effects of a profile
+// reassignment, regardless of which API path triggered it: kick the
+// ad-block scheduler, rebuild routing (the new profile may tunnel),
+// and publish a bus event so subscribers (the Telegram bot, plugins
+// watching /host/v1/events) react.
+func (s *Server) onDeviceProfileChanged(d deviceregistry.Device, oldProfileID string) {
+	s.kick()
+	s.fireConfigApplied(s.Snapshot())
+	if s.eventBus != nil {
+		s.eventBus.Publish(context.Background(), events.Event{
+			Kind: events.KindDeviceProfileChanged,
+			Payload: events.DeviceProfileChanged{
+				MAC:          d.MAC,
+				Label:        d.Label(),
+				NewProfileID: d.ProfileID,
+				OldProfileID: oldProfileID,
+			},
+		})
+	}
+}
+
+// applyDeviceProfile assigns a device to a profile and runs the shared
+// side effects. Used by the host API's write endpoint; mirrors what
+// the LAN PATCH /devices/{mac} does for the profile field.
+func (s *Server) applyDeviceProfile(mac, profileID string) (deviceregistry.Device, error) {
+	if s.devices == nil {
+		return deviceregistry.Device{}, errors.New("device registry not configured")
+	}
+	prev, _ := s.devices.Get(mac)
+	updated, err := s.devices.Update(mac, func(d *deviceregistry.Device) {
+		d.ProfileID = profileID
+	})
+	if err != nil {
+		return deviceregistry.Device{}, err
+	}
+	_ = s.devices.FlushIfDirty()
+	s.onDeviceProfileChanged(updated, prev.ProfileID)
+	return updated, nil
 }
 
 // errDeviceNotFound is reserved for future typed-error paths from the

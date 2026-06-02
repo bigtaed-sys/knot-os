@@ -615,6 +615,14 @@ func main() {
 	// LinuxBackend.
 	apiSrv.SetProductionMode(!*dev)
 
+	// Event bus: in-process pub/sub for "WAN went down", "new device
+	// on the LAN", "profile changed", etc. Created here (before the
+	// plugin runtime) so the host API's event stream can dispatch from
+	// it the moment a plugin connects. Publishers are scattered across
+	// the daemon; subscribers are the notify bot and plugins.
+	eventBus := events.NewBus()
+	apiSrv.SetEventBus(eventBus)
+
 	// Plugin runtime: supervise enabled plugins as subprocesses and
 	// expose the host API on a root-owned loopback Unix socket they
 	// call back through. Production-only — the plugin dir and /run
@@ -741,10 +749,7 @@ func main() {
 		}()
 	}
 
-	// Event bus: in-process pub/sub for "WAN went down", "new
-	// device on the LAN", etc. Subscribers live in the notify
-	// package; publishers are scattered across the daemon.
-	eventBus := events.NewBus()
+	// (eventBus created earlier, before the plugin runtime block.)
 
 	// Notification subsystem: Telegram bot + persistent state.
 	// In dev mode the store still loads but we don't pass a sealer

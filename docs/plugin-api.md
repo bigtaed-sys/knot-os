@@ -76,13 +76,23 @@ Plugins call knotd over `KNOT_HOST_SOCKET`, presenting
 `Authorization: Bearer $KNOT_HOST_TOKEN`. Each endpoint requires a
 permission declared in the manifest.
 
-| Endpoint | Permission | Returns |
+| Endpoint | Permission | Returns / Body |
 |---|---|---|
 | `GET /host/v1/whoami` | — | `{plugin_id, permissions}` |
 | `GET /host/v1/status` | `status:read` | `{role, device_name, version, wan_up, wan_ip}` |
 | `GET /host/v1/devices` | `devices:read` | `{devices: [{mac, label, ip, online}]}` |
+| `POST /host/v1/devices/{mac}/profile` | `devices:write` | body `{profile_id}` → reassigns the device (scheduler kick + routing rebuild + bus event) |
+| `GET /host/v1/events` | `events:read` | Server-Sent Events stream of router events |
 
-More endpoints (and write scopes) are added as the contract grows; the
+### Event stream
+
+`GET /host/v1/events` is a long-lived `text/event-stream`. Each frame is
+`event: <kind>` + `data: {kind, when, payload}`; a `: ping` comment
+every 25s keeps it alive. Kinds include `device_joined`, `wan_status`,
+`device_profile_changed`, `guest_session`, `update_available`. A plugin
+subscribes once and reacts (see the reference plugin's live feed).
+
+More endpoints and write scopes are added as the contract grows; the
 permission model means a plugin only ever reaches what it asked for.
 
 ## Reference

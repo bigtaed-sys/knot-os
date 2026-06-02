@@ -9,10 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 )
 
@@ -149,6 +152,69 @@ func TestPluginProxyForwardsToSocket(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "plugin saw /hello" {
 		t.Errorf("proxy body = %q, want %q", got, "plugin saw /hello")
+	}
+}
+
+func TestHostSetProfileRequiresWriteScope(t *testing.T) {
+	// Plugin has read but not write → 403.
+	srv := serverWithPlugin(t, []string{"devices:read"})
+	srv.pluginSup = fakeRuntime{tokenID: "p1"}
+	req := httptest.NewRequest(http.MethodPost, "/host/v1/devices/aa:bb:cc:dd:ee:ff/profile",
+		strings.NewReader(`{"profile_id":"kids"}`))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	srv.HostAPIHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("write without scope: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	// With the scope, the handler runs; an unknown device → 404 (proves
+	// the gate let it through to applyDeviceProfile).
+	srv2 := serverWithPlugin(t, []string{"devices:write"})
+	srv2.pluginSup = fakeRuntime{tokenID: "p1"}
+	req2 := httptest.NewRequest(http.MethodPost, "/host/v1/devices/aa:bb:cc:dd:ee:ff/profile",
+		strings.NewReader(`{"profile_id":"kids"}`))
+	req2.Header.Set("Authorization", "Bearer tok")
+	rec2 := httptest.NewRecorder()
+	srv2.HostAPIHandler().ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusNotFound {
+		t.Errorf("write with scope, unknown device: want 404, got %d", rec2.Code)
+	}
+}
+
+func TestHostEventsStream(t *testing.T) {
+	srv := serverWithPlugin(t, []string{"events:read"})
+	srv.pluginSup = fakeRuntime{tokenID: "p1"}
+	bus := events.NewBus()
+	srv.SetEventBus(bus)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/host/v1/events", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		srv.HostAPIHandler().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	// Let the handler subscribe, then publish; the stream should carry it.
+	time.Sleep(60 * time.Millisecond)
+	bus.Publish(context.Background(), events.Event{
+		Kind:    events.KindDeviceJoined,
+		Payload: events.DeviceJoined{MAC: "aa:bb:cc:dd:ee:01"},
+	})
+	time.Sleep(60 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: device_joined") {
+		t.Errorf("event stream missing device_joined frame:\n%s", body)
+	}
+	if !strings.Contains(body, "aa:bb:cc:dd:ee:01") {
+		t.Errorf("event stream missing payload mac:\n%s", body)
 	}
 }
 
