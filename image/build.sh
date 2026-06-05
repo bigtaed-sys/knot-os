@@ -109,7 +109,7 @@ for p in "$ROOT/plugins"/*/; do
         # launches via the manifest's `exec`.
         if [[ -f "$dest/go.mod" && -f "$dest/main.go" ]]; then
             echo "    + $name (building binary)"
-            ( cd "$dest" && run_user env GOOS=linux GOARCH=arm64 GOFLAGS=-mod=mod \
+            ( cd "$dest" && run_user env GOWORK=off GOOS=linux GOARCH=arm64 GOFLAGS=-mod=mod \
                 go build -trimpath -ldflags '-s -w' -o "$name" . )
             rm -f "$dest"/*.go "$dest/go.mod" "$dest/go.sum"
         else
@@ -130,7 +130,7 @@ shopt -u nullglob
 echo "==> [3b/7] Staging sing-box binary"
 mkdir -p "$SINGBOX_FILES_DIR" "$CACHE_DIR"
 
-SINGBOX_VERSION="$(run_user env GOFLAGS=-mod=mod \
+SINGBOX_VERSION="$(run_user env GOWORK=off GOFLAGS=-mod=mod \
     go run "$ROOT/core/cmd/print-singbox-version" 2>/dev/null || true)"
 if [[ -z "$SINGBOX_VERSION" ]]; then
     # Fallback: grep the constant directly. Loose match — if the
@@ -199,7 +199,7 @@ echo "    sing-box: $(stat -c '%s' "$SINGBOX_BIN") bytes (v${SINGBOX_VERSION})"
 echo "==> [3c/7] Staging Xray-core binary"
 mkdir -p "$XRAY_FILES_DIR" "$CACHE_DIR"
 
-XRAY_VERSION="$(run_user env GOFLAGS=-mod=mod \
+XRAY_VERSION="$(run_user env GOWORK=off GOFLAGS=-mod=mod \
     go run "$ROOT/core/cmd/print-xray-version" 2>/dev/null || true)"
 if [[ -z "$XRAY_VERSION" ]]; then
     XRAY_VERSION="$(grep -oE 'Version = "[0-9]+\.[0-9]+\.[0-9]+[^"]*"' \
