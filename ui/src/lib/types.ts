@@ -421,3 +421,23 @@ export interface PortForwardsResponse {
 	/** False when the router has no WAN of its own (extender role) — forwards won't take effect. */
 	router_mode: boolean;
 }
+
+// --- Zapret (DPI bypass) --------------------------------------------------
+
+export interface ZapretPreset {
+	id: string;
+	name: string;
+	desc: string;
+}
+
+export interface ZapretResponse {
+	enabled: boolean;
+	strategy: string;
+	custom_args: string;
+	presets: ZapretPreset[];
+	status: {
+		running: boolean;
+		binary_present: boolean;
+		router_mode: boolean;
+	};
+}

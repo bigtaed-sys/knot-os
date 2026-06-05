@@ -4,6 +4,16 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.15] — 2026-06-05
+
+### Zapret — DPI bypass for YouTube / Discord
+
+- A new **Zapret** page brings the [bol-van/zapret](https://github.com/bol-van/zapret) `nfqws` engine to KnotOS: reach throttled YouTube/Discord through ISP DPI without a full tunnel. Packet-level desync (TLS/QUIC fragmentation, fake packets) applied **only** to those services' domains via on-disk hostlists, so the rest of the LAN's traffic is untouched.
+- **Strategy presets** ported from [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) (General / ALT / ALT2 / Discord-only) in a dropdown — DPI behaviour is ISP-specific, so you switch presets until one breaks through, exactly like the Flowseal `.bat` collection. A **custom-strategy** field takes a raw nfqws argument string for full control.
+- **Updatable without a new firmware build.** The desync strategy is config + on-disk lists, not baked into knotd. Domain lists live under `/var/lib/knot/zapret/` and a one-click **"Update from internet"** re-pulls them from the upstream Flowseal repo. The binary ships only seed defaults (written on first run when absent), so refreshed lists survive a knotd update.
+- **Safe by construction:** the nftables hook lives in its own `inet zapret` table, applied/torn down independently of the main ruleset — a bad queue rule can't break NAT/forwarding — and uses `queue … bypass`, so if nfqws is down the packets pass through untouched.
+- **Delivery:** `nfqws` (static arm64, ~125 KB) is staged into the image *and* downloaded-on-demand with a pinned SHA-256 when missing, so a device updated over OTA from an older image still gets the feature without reflashing. Active only in router mode (it acts on WAN-egress traffic).
+
 ## [2026.06.14] — 2026-06-02
 
 Theme: **"Sharper control over traffic"** — three network features the daemon had the plumbing for but no surface to use.

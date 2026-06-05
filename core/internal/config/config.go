@@ -73,6 +73,25 @@ type Network struct {
 	// honoured in the wifi-router role (the extender has no WAN of
 	// its own). Empty == none.
 	PortForwards []PortForward `yaml:"port_forwards,omitempty" json:"port_forwards,omitempty"`
+	// Zapret configures the DPI-bypass engine (nfqws) used to reach
+	// YouTube/Discord through ISP throttling. Nil/disabled == off.
+	Zapret *Zapret `yaml:"zapret,omitempty" json:"zapret,omitempty"`
+}
+
+// Zapret holds the DPI-circumvention (nfqws) settings. The actual
+// desync strategy and domain lists live on disk under the zapret
+// runtime dir and are updatable independently of the knotd binary;
+// this struct only carries the user's on/off + strategy selection.
+type Zapret struct {
+	// Enabled turns the nfqws engine + its nftables NFQUEUE hook on.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Strategy is the ID of a built-in preset ("general", "alt", …).
+	// Ignored when CustomArgs is set.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	// CustomArgs, when non-empty, replaces the preset entirely: it is
+	// the raw nfqws argument string (e.g. pasted from a Flowseal
+	// strategy). Lets the user change strategy without a new binary.
+	CustomArgs string `yaml:"custom_args,omitempty" json:"custom_args,omitempty"`
 }
 
 // PortForward is a single inbound DNAT rule: traffic arriving on the

@@ -19,30 +19,31 @@ import (
 	"net/http"
 
 	"github.com/knot-os/knot-os/core/internal/api"
+	"github.com/knot-os/knot-os/core/internal/applycoord"
 	"github.com/knot-os/knot-os/core/internal/auth"
+	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	knotdns "github.com/knot-os/knot-os/core/internal/dns"
 	"github.com/knot-os/knot-os/core/internal/events"
+	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
+	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/plugin"
 	"github.com/knot-os/knot-os/core/internal/profile"
+	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/scheduler"
 	"github.com/knot-os/knot-os/core/internal/secrets"
+	"github.com/knot-os/knot-os/core/internal/singbox"
+	"github.com/knot-os/knot-os/core/internal/subscription"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
-	"github.com/knot-os/knot-os/core/internal/guest"
-	"github.com/knot-os/knot-os/core/internal/notify"
-	"github.com/knot-os/knot-os/core/internal/applycoord"
-	"github.com/knot-os/knot-os/core/internal/bandwidth"
-	"github.com/knot-os/knot-os/core/internal/routing"
-	"github.com/knot-os/knot-os/core/internal/singbox"
-	"github.com/knot-os/knot-os/core/internal/xray"
-	"github.com/knot-os/knot-os/core/internal/subscription"
 	"github.com/knot-os/knot-os/core/internal/vpn"
 	"github.com/knot-os/knot-os/core/internal/wol"
+	"github.com/knot-os/knot-os/core/internal/xray"
+	"github.com/knot-os/knot-os/core/internal/zapret"
 )
 
 // schedulerDevices adapts deviceregistry.Registry to the scheduler's
@@ -149,6 +150,7 @@ func shouldRedirectHTTPS(cfg config.Config, devMode bool, tlsEnabled bool) bool 
 //	role=wifi-extender    → "<gateway>:53"
 //	role=wifi-router      → "<gateway>:53"
 //	dev mode              → "" (no port 53 binding on a developer's box)
+//
 // dnsUpstreamFromConfig translates the cfg.Network.DNS block (or
 // nil) into the (mode, upstreams) pair the resolver expects. nil
 // or empty mode means UDP plain — back-compat with v0.3 configs.
@@ -180,6 +182,22 @@ func dnsListenForRole(cfg config.Config, devMode bool) string {
 		return ""
 	}
 	return gw + ":53"
+}
+
+// zapretEgressIface returns the interface internet-bound traffic leaves
+// on, which the zapret nft hook matches as oifname. Router → the WAN
+// dongle; extender → the wlan0 STA uplink. Empty (setup role, or router
+// with no WAN yet) disables the hook.
+func zapretEgressIface(cfg config.Config) string {
+	switch cfg.Role {
+	case config.RoleWiFiRouter:
+		if cfg.Network.WAN != nil {
+			return cfg.Network.WAN.Interface
+		}
+	case config.RoleWiFiExtender:
+		return "wlan0"
+	}
+	return ""
 }
 
 // firstUsableIPv4 mirrors the helper in network/linux/apply_setup.go.
@@ -575,9 +593,9 @@ func main() {
 
 	dnsMode, dnsUpstreams := dnsUpstreamFromConfig(cfg)
 	dnsServer := knotdns.New(knotdns.Options{
-		Listen:       dnsListenForRole(cfg, *dev),
-		Blocklists:   dnsBlocklists,
-		Devices:      dnsDeviceLookup{devices: devices, profiles: profiles},
+		Listen:     dnsListenForRole(cfg, *dev),
+		Blocklists: dnsBlocklists,
+		Devices:    dnsDeviceLookup{devices: devices, profiles: profiles},
 		Captive: captiveFunc(func(srcIP net.IP) (net.IP, bool) {
 			if !devices.BlockLanding() || captiveGW == "" {
 				return nil, false
@@ -880,6 +898,13 @@ func main() {
 	// until the routing layer produces at least one Xray upstream.
 	xrayRunner := netlinux.NewXrayRunner()
 	xrayMgr := xray.NewManager(xrayRunner, logger)
+
+	// Zapret (nfqws) supervisor — DPI-bypass for YouTube/Discord. The
+	// runner owns both the nfqws process and its isolated nft hook;
+	// idle until a config with zapret enabled is applied.
+	zapretRunner := netlinux.NewZapretRunner()
+	zapretMgr := zapret.NewManager(zapretRunner, logger)
+	apiSrv.SetZapretManager(zapretMgr)
 
 	// Routing diagnostics endpoint — UI pulls per-device decisions
 	// and the kill-switch list from this. Closes over the live
@@ -1282,6 +1307,20 @@ func main() {
 					logger.Printf("singbox: apply: %v", err)
 				}
 			}
+		}
+
+		// Zapret (nfqws DPI-bypass). Reconciled on every config-applied
+		// so a toggle/strategy change takes effect immediately. Egress
+		// interface is the WAN in router mode, the uplink in extender.
+		zwan := zapretEgressIface(applied)
+		zs := zapret.Settings{WANInterface: zwan}
+		if applied.Network.Zapret != nil {
+			zs.Enabled = applied.Network.Zapret.Enabled
+			zs.Strategy = applied.Network.Zapret.Strategy
+			zs.CustomArgs = applied.Network.Zapret.CustomArgs
+		}
+		if err := zapretMgr.Apply(ctx, zs); err != nil {
+			logger.Printf("zapret: apply: %v", err)
 		}
 	})
 

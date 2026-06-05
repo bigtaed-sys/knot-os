@@ -4,7 +4,7 @@
 //   - public:    /api/status, /api/auth/login    — no session required
 //   - protected: /api/config, /api/auth/logout   — session cookie required
 //   - setup:     /api/setup/*                    — only when role=setup;
-//                added by setupapi.Mount in a separate file.
+//     added by setupapi.Mount in a separate file.
 //
 // Errors are returned in a uniform shape:
 //
@@ -19,22 +19,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/knot-os/knot-os/core/internal/applycoord"
 	"github.com/knot-os/knot-os/core/internal/auth"
+	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/events"
+	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/network"
+	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/plugin"
-	"github.com/knot-os/knot-os/core/internal/applycoord"
-	"github.com/knot-os/knot-os/core/internal/bandwidth"
 	"github.com/knot-os/knot-os/core/internal/profile"
 	"github.com/knot-os/knot-os/core/internal/routing"
 	"github.com/knot-os/knot-os/core/internal/subscription"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
-	"github.com/knot-os/knot-os/core/internal/guest"
-	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/vpn"
+	"github.com/knot-os/knot-os/core/internal/zapret"
 )
 
 // ErrConfigNotInitialized is returned when the API is asked for config state
@@ -50,7 +51,7 @@ type Server struct {
 	sessions        *auth.Sessions
 	plugins         *plugin.Registry
 	pluginSup       pluginRuntime
-	pluginSync      func() // reconcile running processes after a toggle
+	pluginSync      func()   // reconcile running processes after a toggle
 	pluginRTs       sync.Map // socket path → *http.Transport (proxy reuse)
 	pluginInstaller *plugin.Installer
 	pluginIndexURL  string
@@ -69,6 +70,7 @@ type Server struct {
 	routingProvider func() (routing.Result, error)
 	applyCoord      *applycoord.Coordinator
 	bandwidth       *bandwidth.Tracker
+	zapret          *zapret.Manager
 	guest           *guest.Registry
 	notify          *notify.Store
 	notifyBot       *notify.Bot
@@ -172,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountApply(r)
 		s.MountBandwidth(r)
 		s.MountPortForwards(r)
+		s.MountZapret(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth

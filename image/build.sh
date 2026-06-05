@@ -43,6 +43,7 @@ FILES_DIR="$STAGE_DIR/00-install-knotd/files"
 PLUGINS_FILES_DIR="$STAGE_DIR/01-install-plugins/files"
 SINGBOX_FILES_DIR="$STAGE_DIR/03-singbox/files"
 XRAY_FILES_DIR="$STAGE_DIR/04-xray/files"
+ZAPRET_FILES_DIR="$STAGE_DIR/05-zapret/files"
 
 # ---- Pre-flight ------------------------------------------------------------
 
@@ -251,6 +252,57 @@ fi
 install -m 755 "$XRAY_EXTRACTED_BIN" "$XRAY_BIN"
 rm -rf "$XRAY_TMP_EXTRACT"
 echo "    xray: $(stat -c '%s' "$XRAY_BIN") bytes (v${XRAY_VERSION})"
+
+# ---- 3d. Fetch + verify nfqws (zapret) binary -----------------------------
+#
+# nfqws is the DPI-circumvention engine for the YouTube/Discord bypass.
+# Version + the arm64 binary's pinned SHA-256 live in core/internal/zapret/
+# zapret.go (consts Version / NfqwsSHA256 / NfqwsTarMember / DownloadURL).
+# The release tarball carries every arch; we extract + verify just the
+# linux-arm64 static binary. knotd also downloads + verifies this same
+# binary on demand when it's missing (e.g. on a device updated over OTA
+# from an older image), so staging it here is the fast path, not the only
+# path.
+
+echo "==> [3d/7] Staging nfqws (zapret) binary"
+mkdir -p "$ZAPRET_FILES_DIR" "$CACHE_DIR"
+
+ZAPRET_GO="$ROOT/core/internal/zapret/zapret.go"
+ZAPRET_VERSION="$(grep -oE 'Version = "[0-9.]+"' "$ZAPRET_GO" | head -1 | sed -E 's/.*"([^"]+)"/\1/')"
+ZAPRET_SHA256="$(grep -oE 'NfqwsSHA256 = "[0-9a-f]+"' "$ZAPRET_GO" | head -1 | sed -E 's/.*"([^"]+)"/\1/')"
+ZAPRET_MEMBER="$(grep -oE 'NfqwsTarMember = "[^"]+"' "$ZAPRET_GO" | head -1 | sed -E 's/.*"([^"]+)"/\1/')"
+ZAPRET_URL="$(grep -oE 'DownloadURL = "[^"]+"' "$ZAPRET_GO" | head -1 | sed -E 's/.*"([^"]+)"/\1/')"
+if [[ -z "$ZAPRET_VERSION" || -z "$ZAPRET_SHA256" || -z "$ZAPRET_MEMBER" || -z "$ZAPRET_URL" ]]; then
+    echo "fatal: could not read zapret consts from $ZAPRET_GO" >&2
+    exit 1
+fi
+
+ZAPRET_CACHED="$CACHE_DIR/zapret-${ZAPRET_VERSION}.tar.gz"
+ZAPRET_BIN="$ZAPRET_FILES_DIR/nfqws"
+if [[ ! -f "$ZAPRET_CACHED" ]]; then
+    echo "    downloading $ZAPRET_URL"
+    curl -fL --progress-bar -o "$ZAPRET_CACHED" "$ZAPRET_URL"
+fi
+
+ZAPRET_TMP_EXTRACT="$(mktemp -d)"
+tar xzf "$ZAPRET_CACHED" -C "$ZAPRET_TMP_EXTRACT" "$ZAPRET_MEMBER"
+ZAPRET_EXTRACTED_BIN="$ZAPRET_TMP_EXTRACT/$ZAPRET_MEMBER"
+if [[ ! -f "$ZAPRET_EXTRACTED_BIN" ]]; then
+    echo "fatal: nfqws member $ZAPRET_MEMBER not found in tarball" >&2
+    rm -rf "$ZAPRET_TMP_EXTRACT"
+    exit 1
+fi
+ZAPRET_ACTUAL_SHA="$(sha256sum "$ZAPRET_EXTRACTED_BIN" | awk '{print $1}')"
+if [[ "$ZAPRET_ACTUAL_SHA" != "$ZAPRET_SHA256" ]]; then
+    echo "fatal: nfqws ${ZAPRET_VERSION} sha256 mismatch" >&2
+    echo "       expected: $ZAPRET_SHA256" >&2
+    echo "       actual:   $ZAPRET_ACTUAL_SHA" >&2
+    rm -rf "$ZAPRET_TMP_EXTRACT"
+    exit 1
+fi
+install -m 755 "$ZAPRET_EXTRACTED_BIN" "$ZAPRET_BIN"
+rm -rf "$ZAPRET_TMP_EXTRACT"
+echo "    nfqws: $(stat -c '%s' "$ZAPRET_BIN") bytes (zapret v${ZAPRET_VERSION})"
 
 # ---- 4. Download Pi OS Lite (cached) --------------------------------------
 
