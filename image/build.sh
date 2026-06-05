@@ -128,33 +128,18 @@ chmod +x "$FILES_DIR/knotd" "$FILES_DIR/knotctl"
 echo "    knotd:    $(stat -c '%s' "$FILES_DIR/knotd")    bytes"
 echo "    knotctl:  $(stat -c '%s' "$FILES_DIR/knotctl")  bytes"
 
-# ---- 3. Stage bundled plugins ---------------------------------------------
+# ---- 3. Bundled plugins: none -------------------------------------------
+#
+# Plugins are NOT bundled into the image. They're installed at runtime
+# from the separate plugin-store repo, so there's no reason to cross-
+# compile them here (and doing so was the only thing in the image build
+# that needed the Go toolchain for arm64 plugin binaries). The staging
+# dir is cleared so a stale plugin from an earlier build never ships;
+# the downstream copy steps no-op on an empty dir.
 
-echo "==> [3/7] Staging bundled plugins"
+echo "==> [3/7] Bundled plugins: skipped (installed from the store at runtime)"
 mkdir -p "$PLUGINS_FILES_DIR"
 rm -rf "${PLUGINS_FILES_DIR:?}"/*
-shopt -s nullglob
-for p in "$ROOT/plugins"/*/; do
-    name="$(basename "$p")"
-    [[ "$name" == "README.md" ]] && continue
-    if [[ -f "$p/plugin.yaml" ]]; then
-        dest="$PLUGINS_FILES_DIR/$name"
-        cp -r "$p" "$dest"
-        # A plugin that ships Go source (go.mod + main.go) is built
-        # here for the Pi and its source stripped from the image — the
-        # rootfs gets only the manifest + the arm64 binary the runtime
-        # launches via the manifest's `exec`.
-        if [[ -f "$dest/go.mod" && -f "$dest/main.go" ]]; then
-            echo "    + $name (building binary)"
-            ( cd "$dest" && run_user env GOWORK=off GOOS=linux GOARCH=arm64 GOFLAGS=-mod=mod \
-                go build -trimpath -ldflags '-s -w' -o "$name" . )
-            rm -f "$dest"/*.go "$dest/go.mod" "$dest/go.sum"
-        else
-            echo "    + $name"
-        fi
-    fi
-done
-shopt -u nullglob
 
 # ---- 3b. Fetch + verify sing-box binary -----------------------------------
 #
