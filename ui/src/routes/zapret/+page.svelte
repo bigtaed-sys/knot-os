@@ -3,7 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, apiPost, ApiError } from '$lib/api';
-	import type { ZapretResponse, ZapretPreset } from '$lib/types';
+	import type {
+		ZapretResponse,
+		ZapretPreset,
+		ZapretAutoTuneResponse,
+		ZapretTuneResult
+	} from '$lib/types';
 
 	let enabled = $state(false);
 	let strategy = $state('general');
@@ -18,6 +23,10 @@
 	let savedFlash = $state(false);
 	let refreshMsg = $state<string | null>(null);
 	let useCustom = $state(false);
+
+	let tuning = $state(false);
+	let tuneResults = $state<ZapretTuneResult[]>([]);
+	let tuneWinner = $state<string | null>(null);
 
 	async function refresh() {
 		loading = true;
@@ -89,6 +98,33 @@
 		}
 	}
 
+	async function autoTune() {
+		tuning = true;
+		error = null;
+		tuneResults = [];
+		tuneWinner = null;
+		try {
+			const r = await apiPost<ZapretAutoTuneResponse>(
+				'/zapret/autotune',
+				{},
+				{ timeoutMs: 180000 }
+			);
+			tuneResults = r.results ?? [];
+			tuneWinner = r.winner;
+			// The server already enabled + saved the winner; reflect it.
+			await refresh();
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const body = e.body as { error?: { message?: string } } | undefined;
+				error = body?.error?.message ?? e.message;
+			} else {
+				error = e instanceof Error ? e.message : String(e);
+			}
+		} finally {
+			tuning = false;
+		}
+	}
+
 	onMount(refresh);
 </script>
 
@@ -141,8 +177,51 @@
 	<!-- Strategy -->
 	<section class="surface p-5 mb-5 space-y-4" class:opacity-60={!enabled}>
 		<div>
-			<div class="label">{$_('zapret.strategy')}</div>
+			<div class="flex items-center justify-between gap-3 flex-wrap">
+				<div class="label !mb-0">{$_('zapret.strategy')}</div>
+				<button
+					class="btn-ghost text-sm shrink-0"
+					type="button"
+					disabled={!enabled || tuning}
+					onclick={autoTune}
+					title={$_('zapret.autotune_help')}
+				>
+					{#if tuning}
+						<span class="spinner"></span>{$_('zapret.autotuning')}
+					{:else}
+						<i class="bi bi-magic"></i>{$_('zapret.autotune')}
+					{/if}
+				</button>
+			</div>
 			<p class="help mb-3">{$_('zapret.strategy_help')}</p>
+
+			{#if tuning}
+				<div class="mb-3 text-xs text-zinc-500 dark:text-zinc-400 flex items-start gap-2">
+					<i class="bi bi-hourglass-split mt-0.5"></i>
+					<span>{$_('zapret.autotune_running')}</span>
+				</div>
+			{/if}
+
+			{#if tuneResults.length > 0}
+				<div class="mb-3 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+					{#each tuneResults as r (r.strategy)}
+						<div
+							class="flex items-center gap-3 px-3 py-2 text-sm border-b last:border-0 border-zinc-100 dark:border-zinc-800
+							{r.strategy === tuneWinner ? 'bg-emerald-50 dark:bg-emerald-500/10' : ''}"
+						>
+							<span class="flex-1 min-w-0 truncate">
+								{#if r.strategy === tuneWinner}
+									<i class="bi bi-trophy-fill text-emerald-500 mr-1"></i>
+								{/if}
+								{r.name}
+							</span>
+							<span class="text-xs font-mono tabular-nums {r.ok === r.total ? 'text-emerald-600 dark:text-emerald-400' : r.ok === 0 ? 'text-red-500' : 'text-amber-600 dark:text-amber-400'}">
+								{r.ok}/{r.total}
+							</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
 
 			<div class="space-y-1.5">
 				{#each presets as p (p.id)}

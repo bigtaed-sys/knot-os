@@ -22,6 +22,22 @@ func (s *Server) MountZapret(r chi.Router) {
 	r.Get("/zapret", s.handleGetZapret)
 	r.Put("/zapret", s.handlePutZapret)
 	r.Post("/zapret/refresh", s.handleRefreshZapret)
+	r.Post("/zapret/autotune", s.handleAutoTuneZapret)
+}
+
+// zapretEgressIface mirrors the helper in cmd/knotd: the interface
+// internet-bound traffic leaves on, which the nft hook (and the
+// auto-tune probes) need. Empty disables (setup role / no WAN).
+func zapretEgressIface(cfg config.Config) string {
+	switch cfg.Role {
+	case config.RoleWiFiRouter:
+		if cfg.Network.WAN != nil {
+			return cfg.Network.WAN.Interface
+		}
+	case config.RoleWiFiExtender:
+		return "wlan0"
+	}
+	return ""
 }
 
 type presetJSON struct {
@@ -76,6 +92,44 @@ func (s *Server) handlePutZapret(w http.ResponseWriter, r *http.Request) {
 	}
 	status, payload := s.commitConfig(r.Context(), incoming, "api:put-zapret")
 	writeJSON(w, status, payload)
+}
+
+func (s *Server) handleAutoTuneZapret(w http.ResponseWriter, r *http.Request) {
+	if s.zapret == nil {
+		writeError(w, http.StatusServiceUnavailable, "zapret_disabled", "engine not available")
+		return
+	}
+	cfg := s.Snapshot()
+	wan := zapretEgressIface(cfg)
+	if wan == "" {
+		writeError(w, http.StatusUnprocessableEntity, "no_wan",
+			"auto-tune needs a WAN interface — switch to router mode first")
+		return
+	}
+
+	results, winner, err := s.zapret.AutoTune(r.Context(), zapret.Settings{
+		Enabled:      true,
+		WANInterface: wan,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "autotune_failed", err.Error())
+		return
+	}
+	zapret.SortByScore(results)
+
+	// Persist the winner so it sticks across restarts. The re-apply this
+	// triggers is a no-op (the winner is already running).
+	incoming := cfg
+	incoming.Network.Zapret = &config.Zapret{Enabled: true, Strategy: winner}
+	if status, payload := s.commitConfig(r.Context(), incoming, "api:zapret-autotune"); status != http.StatusOK {
+		writeJSON(w, status, payload)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"winner":  winner,
+		"results": results,
+	})
 }
 
 func (s *Server) handleRefreshZapret(w http.ResponseWriter, r *http.Request) {

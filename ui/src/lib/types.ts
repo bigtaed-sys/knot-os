@@ -441,3 +441,16 @@ export interface ZapretResponse {
 		router_mode: boolean;
 	};
 }
+
+export interface ZapretTuneResult {
+	strategy: string;
+	name: string;
+	ok: number;
+	total: number;
+	latency_ms: number;
+}
+
+export interface ZapretAutoTuneResponse {
+	winner: string;
+	results: ZapretTuneResult[];
+}

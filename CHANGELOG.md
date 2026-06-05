@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.15-1] — 2026-06-05
+
+### Added
+
+- **Zapret auto-detect.** An "Auto-detect" button on the Zapret page cycles through every preset, applies each live, and probes the YouTube/Discord test hosts (TLS handshake to `i.ytimg.com`, `www.youtube.com`, `cdn.discordapp.com`, `gateway.discord.gg`) through the active bypass — then picks and saves the preset with the most successful handshakes (lowest latency breaks ties). Mirrors zapret's `blockcheck`. Runs on the router itself (the nft hook sits on WAN postrouting, which also catches knotd's own connections) and shows a per-strategy score table including an "off" baseline. Best at spotting RST-based blocking (Discord, RST-throttled YouTube); pure bandwidth throttling, where handshakes succeed regardless, is harder to detect — fall back to trying presets by eye there.
+
 ## [2026.06.15] — 2026-06-05
 
 ### Zapret — DPI bypass for YouTube / Discord
