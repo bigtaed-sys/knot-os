@@ -70,6 +70,11 @@ func (m *Manager) AutoTune(ctx context.Context, s Settings) ([]TuneResult, strin
 		return nil, "", err
 	}
 
+	strategies := LoadStrategies(m.base)
+	if len(strategies) == 0 {
+		return nil, "", fmt.Errorf("no strategies available")
+	}
+
 	var results []TuneResult
 
 	// Baseline: bypass off, so the UI can show whether it's needed.
@@ -79,12 +84,12 @@ func (m *Manager) AutoTune(ctx context.Context, s Settings) ([]TuneResult, strin
 	base.Strategy, base.Name = "off", "Без обхода"
 	results = append(results, base)
 
-	for _, p := range presets {
-		args, err := RenderArgs(Settings{Enabled: true, Strategy: p.ID}, m.base)
+	for _, p := range strategies {
+		args, tcp, udp, err := BuildInvocation(Settings{Enabled: true, Strategy: p.ID}, m.base)
 		if err != nil {
 			continue
 		}
-		if err := m.runner.Start(ctx, binPath, args, s.WANInterface); err != nil {
+		if err := m.runner.Start(ctx, binPath, args, s.WANInterface, tcp, udp); err != nil {
 			continue
 		}
 		sleep(ctx, settleDelay)
@@ -96,21 +101,22 @@ func (m *Manager) AutoTune(ctx context.Context, s Settings) ([]TuneResult, strin
 		}
 	}
 
-	winner := bestStrategy(results)
+	winner := bestStrategy(results, strategies)
 
 	// Leave the winner applied and running.
-	wargs, err := RenderArgs(Settings{Enabled: true, Strategy: winner}, m.base)
+	wargs, wtcp, wudp, err := BuildInvocation(Settings{Enabled: true, Strategy: winner}, m.base)
 	if err == nil {
-		if err := m.runner.Start(ctx, binPath, wargs, s.WANInterface); err == nil {
-			m.lastKey = s.WANInterface + "\x00" + strings.Join(wargs, "\x00")
+		if err := m.runner.Start(ctx, binPath, wargs, s.WANInterface, wtcp, wudp); err == nil {
+			m.lastKey = strings.Join([]string{s.WANInterface, wtcp, wudp, strings.Join(wargs, "\x00")}, "\x01")
 		}
 	}
 	return results, winner, nil
 }
 
-// bestStrategy picks the preset (never "off") with the most successful
-// probes, breaking ties by lowest summed latency.
-func bestStrategy(results []TuneResult) string {
+// bestStrategy picks the strategy (never "off") with the most
+// successful probes, breaking ties by lowest summed latency. Falls
+// back to the first available strategy when nothing scored.
+func bestStrategy(results []TuneResult, strategies []Strategy) string {
 	best := ""
 	var bestRes TuneResult
 	for _, r := range results {
@@ -121,8 +127,8 @@ func bestStrategy(results []TuneResult) string {
 			best, bestRes = r.Strategy, r
 		}
 	}
-	if best == "" && len(presets) > 0 {
-		return presets[0].ID
+	if best == "" && len(strategies) > 0 {
+		return strategies[0].ID
 	}
 	return best
 }

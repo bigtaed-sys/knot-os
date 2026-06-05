@@ -4,6 +4,13 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.15-2] — 2026-06-05
+
+### Changed
+
+- **Zapret strategies are now the real Flowseal ones, and they update from upstream.** The previous hand-written presets used dated desync methods that ISPs block. KnotOS now ships the actual `Flowseal/zapret-discord-youtube` strategy `.bat` files (General + ALT…ALT6 + FAKE TLS AUTO + SIMPLE FAKE), converted winws→nfqws at load time: windivert `--wf-*` flags are stripped (their ports drive the nft queue instead), `%BIN%/%LISTS%` become on-disk paths, and the empty game-filter profiles are dropped. So you get current methods like `multisplit`+`seqovl`, `hostfakesplit` and `fake-tls-mod` (ALT3) verbatim.
+- **"Update from Flowseal"** now refreshes both the domain lists **and** the strategy catalogue from the upstream repo — strategies are data on disk, so they track upstream without a new knotd build. The nft queue ports are derived per-strategy from each strategy's filter, so strategies that need extra ports (e.g. discord.media on 2053/8443) get them automatically.
+
 ## [2026.06.15-1] — 2026-06-05
 
 ### Added

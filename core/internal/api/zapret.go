@@ -53,11 +53,11 @@ func (s *Server) handleGetZapret(w http.ResponseWriter, _ *http.Request) {
 		z = &config.Zapret{Strategy: "general"}
 	}
 	presets := make([]presetJSON, 0)
-	for _, p := range zapret.Presets() {
-		presets = append(presets, presetJSON{ID: p.ID, Name: p.Name, Desc: p.Desc})
-	}
 	running, binaryPresent := false, false
 	if s.zapret != nil {
+		for _, p := range zapret.LoadStrategies(s.zapret.BaseDir()) {
+			presets = append(presets, presetJSON{ID: p.ID, Name: p.Name, Desc: p.Desc})
+		}
 		running = s.zapret.Running()
 		binaryPresent = s.zapret.BinaryPresent()
 	}
@@ -137,7 +137,7 @@ func (s *Server) handleRefreshZapret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "zapret_disabled", "engine not available")
 		return
 	}
-	n, err := zapret.RefreshLists(r.Context(), s.zapret.BaseDir())
+	n, err := zapret.Refresh(r.Context(), s.zapret.BaseDir())
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "refresh_failed", err.Error())
 		return

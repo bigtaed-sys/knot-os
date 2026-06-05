@@ -11,10 +11,11 @@ import (
 // and its isolated nftables queue rule. The real implementation lives
 // in core/internal/network/linux; a no-op stub covers dev hosts.
 type Runner interface {
-	// Start applies the nft queue rule for wanIface and (re)starts
-	// nfqws with args. Implementations should be idempotent-friendly:
-	// the Manager only calls Start when the effective config changed.
-	Start(ctx context.Context, binPath string, args []string, wanIface string) error
+	// Start applies the nft queue rule for wanIface (matching tcpPorts
+	// + udpPorts) and (re)starts nfqws with args. Implementations
+	// should be idempotent-friendly: the Manager only calls Start when
+	// the effective config changed.
+	Start(ctx context.Context, binPath string, args []string, wanIface, tcpPorts, udpPorts string) error
 	// Stop tears down the nft rule and stops nfqws.
 	Stop(ctx context.Context) error
 	// Running reports whether nfqws is currently up.
@@ -84,12 +85,12 @@ func (m *Manager) Apply(ctx context.Context, s Settings) error {
 		return err
 	}
 
-	args, err := RenderArgs(s, m.base)
+	args, tcpPorts, udpPorts, err := BuildInvocation(s, m.base)
 	if err != nil {
 		return err
 	}
 
-	key := s.WANInterface + "\x00" + strings.Join(args, "\x00")
+	key := strings.Join([]string{s.WANInterface, tcpPorts, udpPorts, strings.Join(args, "\x00")}, "\x01")
 	if m.runner == nil {
 		m.lastKey = key
 		return nil
@@ -102,7 +103,7 @@ func (m *Manager) Apply(ctx context.Context, s Settings) error {
 	if err != nil {
 		return err
 	}
-	if err := m.runner.Start(ctx, binPath, args, s.WANInterface); err != nil {
+	if err := m.runner.Start(ctx, binPath, args, s.WANInterface, tcpPorts, udpPorts); err != nil {
 		return err
 	}
 	m.lastKey = key

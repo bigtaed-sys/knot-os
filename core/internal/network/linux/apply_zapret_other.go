@@ -17,6 +17,8 @@ func NewZapretRunner() *ZapretRunner { return &ZapretRunner{} }
 
 var _ zapret.Runner = (*ZapretRunner)(nil)
 
-func (r *ZapretRunner) Start(_ context.Context, _ string, _ []string, _ string) error { return nil }
-func (r *ZapretRunner) Stop(_ context.Context) error                                  { return nil }
-func (r *ZapretRunner) Running() bool                                                 { return false }
+func (r *ZapretRunner) Start(_ context.Context, _ string, _ []string, _, _, _ string) error {
+	return nil
+}
+func (r *ZapretRunner) Stop(_ context.Context) error { return nil }
+func (r *ZapretRunner) Running() bool                { return false }

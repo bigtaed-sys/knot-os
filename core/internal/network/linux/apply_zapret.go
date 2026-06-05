@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/knot-os/knot-os/core/internal/zapret"
@@ -35,11 +36,11 @@ var _ zapret.Runner = (*ZapretRunner)(nil)
 const zapretNftPath = "/run/knot/zapret.nft"
 
 // Start applies the nft queue rule for wanIface then (re)starts nfqws.
-func (r *ZapretRunner) Start(ctx context.Context, binPath string, args []string, wanIface string) error {
+func (r *ZapretRunner) Start(ctx context.Context, binPath string, args []string, wanIface, tcpPorts, udpPorts string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := applyZapretNft(ctx, wanIface); err != nil {
+	if err := applyZapretNft(ctx, wanIface, tcpPorts, udpPorts); err != nil {
 		// Isolated table — failure here doesn't touch the main ruleset.
 		return fmt.Errorf("zapret: nft: %w", err)
 	}
@@ -81,17 +82,22 @@ func (r *ZapretRunner) Running() bool {
 // NFQUEUE; only the first few packets per flow (where the ClientHello /
 // QUIC-initial lives) are queued, and nfqws's own reinjected (marked)
 // packets are skipped so fakes don't loop.
-func applyZapretNft(ctx context.Context, wanIface string) error {
+func applyZapretNft(ctx context.Context, wanIface, tcpPorts, udpPorts string) error {
+	if tcpPorts == "" {
+		tcpPorts = zapret.DefaultTCPPorts
+	}
+	if udpPorts == "" {
+		udpPorts = zapret.DefaultUDPPorts
+	}
 	ruleset := fmt.Sprintf(`table inet zapret {
     chain post {
         type filter hook postrouting priority -150; policy accept;
         meta mark and 0x%08x == 0x%08x accept
-        oifname "%[3]s" tcp dport { 80, 443 } ct original packets 1-6 queue num %[4]d bypass
-        oifname "%[3]s" udp dport 443 ct original packets 1-8 queue num %[4]d bypass
-        oifname "%[3]s" udp dport { 19294-19344, 50000-50100 } ct original packets 1-12 queue num %[4]d bypass
+        oifname "%[3]s" tcp dport { %[5]s } ct original packets 1-6 queue num %[4]d bypass
+        oifname "%[3]s" udp dport { %[6]s } ct original packets 1-12 queue num %[4]d bypass
     }
 }
-`, zapret.DesyncMark, zapret.DesyncMark, wanIface, zapret.QueueNum)
+`, zapret.DesyncMark, zapret.DesyncMark, wanIface, zapret.QueueNum, nftPortSet(tcpPorts), nftPortSet(udpPorts))
 
 	if err := os.MkdirAll(filepath.Dir(zapretNftPath), 0o755); err != nil {
 		return err
@@ -102,6 +108,19 @@ func applyZapretNft(ctx context.Context, wanIface string) error {
 	// Replace any prior table atomically: delete then load.
 	deleteZapretNft(ctx)
 	return runNft(ctx, "-f", zapretNftPath)
+}
+
+// nftPortSet turns "80,443,19294-19344" into "80, 443, 19294-19344"
+// for an nft anonymous set body. Ranges (a-b) pass through unchanged.
+func nftPortSet(csv string) string {
+	parts := strings.Split(csv, ",")
+	clean := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			clean = append(clean, p)
+		}
+	}
+	return strings.Join(clean, ", ")
 }
 
 func deleteZapretNft(ctx context.Context) {
