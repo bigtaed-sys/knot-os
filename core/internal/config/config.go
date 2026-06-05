@@ -163,19 +163,39 @@ type WiFiAP struct {
 	Channel int `yaml:"channel,omitempty" json:"channel,omitempty"`
 }
 
-// WAN describes the upstream Ethernet for the wifi-router role.
+// WAN describes the upstream for the wifi-router role.
 //
-// v0.3 only supports the default "dhcp" mode — knotd runs a DHCP
-// client (dhclient) on Interface and uses whatever the upstream
-// router hands out. Static-IP and PPPoE are scoped for v0.4.
+// Modes:
+//   - "dhcp" (default): knotd runs a DHCP client on Interface (an
+//     Ethernet WAN) and uses whatever the upstream hands out.
+//   - "modem": the WAN is a USB cellular modem. Interface is resolved
+//     dynamically (the modem's data netdev, e.g. wwan0) after knotd
+//     connects it via ModemManager; the Modem block carries APN/PIN.
 type WAN struct {
 	// Interface is the kernel netdev name (e.g. "eth0"). Resolved
 	// at apply-time from the capability probe; the wizard surfaces
 	// the friendly model name but stores the kernel name here so
-	// future udev re-naming doesn't silently break the role.
+	// future udev re-naming doesn't silently break the role. May be
+	// empty in "modem" mode (the data interface is discovered).
 	Interface string `yaml:"interface" json:"interface"`
-	// Mode is one of: "dhcp" (default).
+	// Mode is "dhcp" (default) or "modem".
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Modem holds cellular settings, used only when Mode == "modem".
+	Modem *Modem `yaml:"modem,omitempty" json:"modem,omitempty"`
+}
+
+// Modem configures a USB cellular (LTE/4G) WAN driven via ModemManager.
+// Most carriers auto-provision, so APN is often the only field needed;
+// some require a PIN or a user/password pair.
+type Modem struct {
+	// APN is the carrier access point name (e.g. "internet"). Empty
+	// lets ModemManager try the carrier default.
+	APN string `yaml:"apn,omitempty" json:"apn,omitempty"`
+	// PIN unlocks the SIM when it's PIN-locked. Empty == no PIN.
+	PIN string `yaml:"pin,omitempty" json:"pin,omitempty"`
+	// Username / Password for the rare carriers that require PAP/CHAP.
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
+	Password string `yaml:"password,omitempty" json:"password,omitempty"`
 }
 
 // LAN is the IPv4 subnet config for the AP side.

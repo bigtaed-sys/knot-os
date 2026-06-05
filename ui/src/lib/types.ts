@@ -454,3 +454,26 @@ export interface ZapretAutoTuneResponse {
 	winner: string;
 	results: ZapretTuneResult[];
 }
+
+// --- Cellular modem (WAN) -------------------------------------------------
+
+export interface ModemStatus {
+	present: boolean;
+	state?: string;
+	operator?: string;
+	tech?: string;
+	signal_percent: number;
+	interface?: string;
+	manufacturer?: string;
+	model?: string;
+	lock_required?: string;
+}
+
+export interface ModemResponse {
+	as_wan: boolean;
+	apn: string;
+	username: string;
+	has_pin: boolean;
+	status: ModemStatus;
+	router_mode: boolean;
+}

@@ -60,15 +60,23 @@ func guestDnsmasqExtras(g *HostapdGuestBSS) []DnsmasqExtra {
 //     own resolver on the gateway IP).
 //  6. Enable forwarding + load NAT rules for wlan0 → wan.
 func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error {
-	if cfg.Network.WAN == nil || cfg.Network.WAN.Interface == "" {
-		return errors.New("applyRouter: wan.interface missing — config is invalid")
+	if cfg.Network.WAN == nil {
+		return errors.New("applyRouter: wan missing — config is invalid")
 	}
 	if cfg.Network.AP == nil {
 		return errors.New("applyRouter: ap missing — config is invalid")
 	}
+	modemMode := cfg.Network.WAN.Mode == "modem"
 	wan := cfg.Network.WAN.Interface
-	if !interfaceExists(wan) {
-		return fmt.Errorf("applyRouter: WAN interface %q not present", wan)
+	// In Ethernet mode the interface must exist up front; in modem mode
+	// the data interface is discovered after we connect the modem below.
+	if !modemMode {
+		if wan == "" {
+			return errors.New("applyRouter: wan.interface missing — config is invalid")
+		}
+		if !interfaceExists(wan) {
+			return fmt.Errorf("applyRouter: WAN interface %q not present", wan)
+		}
 	}
 	lan := cfg.Network.LAN
 	if lan == nil {
@@ -121,20 +129,55 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	// dashboard's WAN tile flips from "down" to "up" with the IP.
 	// The AP, NAT, DNS, and admin UI come up immediately and stay
 	// reachable from the LAN regardless of the WAN's state.
-	if err := b.linkUp(ctx, wan); err != nil {
-		return fmt.Errorf("applyRouter: bring %s up: %w", wan, err)
+	// Cellular WAN: connect the modem via ModemManager and adopt its
+	// data interface as the WAN. needsDHCP is false when the modem
+	// negotiated a static address (typical for QMI) — connectModem
+	// applied it already, so we skip dhclient below. A modem that
+	// isn't plugged in / connectable doesn't abort the apply: the AP,
+	// NAT and admin UI still come up so the user can fix the SIM/APN.
+	// Cellular WAN: connect the modem via ModemManager and adopt its
+	// data interface as the WAN. needsDHCP is false when the modem
+	// negotiated a static address (typical for QMI) — connectModem
+	// applied it already, so we skip dhclient. A modem that isn't
+	// plugged in / connectable doesn't abort the apply: the AP, NAT
+	// and admin UI still come up so the user can fix the SIM/APN.
+	modemDHCP := true
+	if modemMode {
+		iface, dhcp, err := b.connectModem(ctx, cfg.Network.WAN.Modem)
+		if err != nil {
+			b.logger.Printf("applyRouter: modem: %v (continuing, WAN down)", err)
+			wan = ""
+		} else {
+			wan, modemDHCP = iface, dhcp
+			b.logger.Printf("applyRouter: cellular WAN up on %s (dhcp=%v)", wan, dhcp)
+		}
 	}
-	// Kill any leftover dhclient on this interface (from a previous
-	// apply or boot) before starting a fresh one. Best-effort.
-	b.r.runIgnoreError(ctx, "pkill", "-f", "dhclient.*"+wan)
-	// dhclient without `-1` daemonizes and keeps retrying internally.
-	// We don't supervise it through supervisedProc because it
-	// self-daemonizes; just fire and forget.
-	if err := b.r.runOK(ctx, "dhclient", wan); err != nil {
-		// Non-zero from dhclient occasionally happens when racing
-		// with a previous instance during a rapid re-apply. The AP
-		// path below is what users actually need to function.
-		b.logger.Printf("applyRouter: dhclient on %s returned %v (continuing)", wan, err)
+
+	if wan == "" {
+		// No usable WAN yet (modem absent / unconnectable). The LAN side
+		// still comes up so the dashboard stays reachable; a re-apply
+		// once the modem is ready wires up NAT.
+		b.logger.Printf("applyRouter: no WAN interface available — bringing up LAN only")
+	} else {
+		if err := b.linkUp(ctx, wan); err != nil {
+			return fmt.Errorf("applyRouter: bring %s up: %w", wan, err)
+		}
+		if modemDHCP {
+			// Kill any leftover dhclient on this interface before starting
+			// a fresh self-daemonizing one. Best-effort; the AP path below
+			// is what users actually need to function.
+			b.r.runIgnoreError(ctx, "pkill", "-f", "dhclient.*"+wan)
+			if err := b.r.runOK(ctx, "dhclient", wan); err != nil {
+				b.logger.Printf("applyRouter: dhclient on %s returned %v (continuing)", wan, err)
+			}
+		}
+	}
+
+	// Downstream nft/NAT need a non-empty interface token even when no
+	// WAN is up yet; a sentinel name (no such device) keeps the ruleset
+	// valid while its WAN rules simply never match.
+	if wan == "" {
+		wan = "knot-nowan"
 	}
 
 	// 3. wlan0 LAN side. Same gateway-on-the-LAN-CIDR pattern as

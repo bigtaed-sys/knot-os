@@ -4,6 +4,15 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.16] — 2026-06-06
+
+### Cellular modem WAN — Phase 1 (experimental)
+
+- New **Cellular modem** page: share internet from a USB LTE/4G modem. A new WAN mode `modem` drives the modem via **ModemManager** (`mmcli`) — unlock the SIM (PIN), attach with the carrier **APN**, and adopt the modem's data interface (e.g. `wwan0`) as the router WAN; NAT/DHCP/AP are identical to the Ethernet path from there. QMI static-addressed bearers are applied directly; DHCP bearers get a `dhclient`. HiLink dongles that show up as a plain network card can still be used via the normal `dhcp` WAN instead.
+- Live status (polled): modem model, carrier, access tech (LTE/5G), **signal bars**, connection state, and SIM-lock prompt. The image now bundles `modemmanager`, `libqmi-utils`, `libmbim-utils`, and `usb-modeswitch`.
+- **Off by default** — your current Ethernet/Wi-Fi WAN is untouched until you switch the mode on the Modem page. If the modem isn't connectable, the apply no longer aborts: the LAN/AP and dashboard stay up so you can fix the SIM/APN.
+- **Experimental:** built to the ModemManager spec without modem hardware on hand. Recommended modem for external **MIMO** antennas: **Quectel EC25-E / EP06-E** (or Sierra EM7455) in a USB enclosure. Failover (auto-switch wired ↔ cellular) is Phase 2.
+
 ## [2026.06.15-3] — 2026-06-06
 
 ### Fixed

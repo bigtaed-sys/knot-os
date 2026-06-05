@@ -107,11 +107,21 @@ func protoParts(proto string) []string {
 // upstream STA to align with). Channel 0 ("auto") is allowed and
 // hostapd will pick.
 func (n Network) validateRouter() error {
-	if n.WAN == nil || n.WAN.Interface == "" {
-		return fmt.Errorf("wan.interface is required for wifi-router role")
+	if n.WAN == nil {
+		return fmt.Errorf("wan is required for wifi-router role")
 	}
-	if n.WAN.Mode != "" && n.WAN.Mode != "dhcp" {
-		return fmt.Errorf("wan.mode: only \"dhcp\" is supported in v0.3 (got %q)", n.WAN.Mode)
+	switch n.WAN.Mode {
+	case "", "dhcp":
+		// Ethernet WAN: a concrete interface is required.
+		if n.WAN.Interface == "" {
+			return fmt.Errorf("wan.interface is required for wifi-router role")
+		}
+	case "modem":
+		// Cellular WAN: the data interface is discovered at apply time,
+		// so wan.interface may be empty. Nothing else is mandatory —
+		// APN/PIN are carrier-specific and often auto-provisioned.
+	default:
+		return fmt.Errorf("wan.mode: must be \"dhcp\" or \"modem\" (got %q)", n.WAN.Mode)
 	}
 	if n.AP == nil || n.AP.SSID == "" {
 		return fmt.Errorf("ap.ssid is required for wifi-router role")

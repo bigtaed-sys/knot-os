@@ -88,6 +88,31 @@ type APStatus struct {
 	Clients int    `json:"clients"`
 }
 
+// ModemStatus is the runtime state of a USB cellular WAN, as reported
+// by ModemManager. All fields are best-effort — a missing/!present
+// modem yields the zero value with Present=false.
+type ModemStatus struct {
+	// Present is true when ModemManager sees a modem at all.
+	Present bool `json:"present"`
+	// State is ModemManager's state ("connected", "registered",
+	// "searching", "disabled", "locked", ...).
+	State string `json:"state,omitempty"`
+	// Operator is the registered carrier name.
+	Operator string `json:"operator,omitempty"`
+	// Tech is the access technology ("lte", "5gnr", "umts", ...).
+	Tech string `json:"tech,omitempty"`
+	// SignalPercent is ModemManager's 0-100 signal quality.
+	SignalPercent int `json:"signal_percent"`
+	// Interface is the data netdev once connected (e.g. "wwan0").
+	Interface string `json:"interface,omitempty"`
+	// Model / Manufacturer identify the hardware for the UI.
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	// LockRequired is the SIM lock state ("sim-pin", "sim-puk", or
+	// "" when unlocked) — the UI prompts for a PIN when it's sim-pin.
+	LockRequired string `json:"lock_required,omitempty"`
+}
+
 // WANStatus is the runtime state of the Ethernet WAN interface in
 // wifi-router mode.
 type WANStatus struct {

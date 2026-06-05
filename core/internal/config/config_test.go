@@ -163,7 +163,7 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 				c.Network.AP = &WiFiAP{SSID: "a", Band: "2.4"}
 				c.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
 			},
-			wantSub: "wan.interface",
+			wantSub: "wan is required",
 		},
 		{
 			name: "router unsupported WAN mode",

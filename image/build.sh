@@ -420,7 +420,12 @@ if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
             wireless-regdb \
             isc-dhcp-client \
             avahi-daemon \
-            wireguard-tools
+            wireguard-tools \
+            modemmanager \
+            libqmi-utils \
+            libmbim-utils \
+            usb-modeswitch \
+            usb-modeswitch-data
         apt-get clean
         rm -rf /var/lib/apt/lists/*
     "
@@ -441,6 +446,9 @@ if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
         systemctl enable ssh.service
         systemctl enable getty@ttyGS0.service           2>/dev/null || true
         systemctl enable serial-getty@ttyGS0.service    2>/dev/null || true
+        # ModemManager drives the optional USB cellular WAN; knotd talks
+        # to it via mmcli. Idle (no power cost) until a modem is present.
+        systemctl enable ModemManager.service           2>/dev/null || true
     "
 
     # Default hostname; overwritten if user picks a name in the wizard.

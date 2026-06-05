@@ -175,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountBandwidth(r)
 		s.MountPortForwards(r)
 		s.MountZapret(r)
+		s.MountModem(r)
 	})
 
 	// Setup endpoints — gated by role inside the handler, no auth
