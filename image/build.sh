@@ -73,6 +73,13 @@ run_user() {
     fi
 }
 
+# Use whatever Go is installed; never try to auto-download a toolchain
+# (offline builders, or a go.mod directive newer than the local Go,
+# would otherwise abort with "toolchain not available"). Preserved into
+# run_user via sudo -E. The module go-directive is kept conservative so
+# a stock distro Go suffices.
+export GOTOOLCHAIN=local
+
 # ---- 1. Build UI ----------------------------------------------------------
 
 echo "==> [1/7] Building UI"
