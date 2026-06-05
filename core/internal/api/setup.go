@@ -11,6 +11,7 @@ import (
 
 	"github.com/knot-os/knot-os/core/internal/auth"
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/network/capability"
 )
 
@@ -23,9 +24,24 @@ func (s *Server) MountSetup(r chi.Router) {
 		r.Use(s.requireSetupRole)
 		r.Get("/scan", s.handleSetupScan)
 		r.Get("/capability", s.handleSetupCapability)
+		r.Get("/modem", s.handleSetupModem)
 		r.Get("/qr", s.handleSetupQR)
 		r.Post("/complete", s.handleSetupComplete)
 	})
+}
+
+// handleSetupModem reports whether a USB cellular modem is present, so
+// the wizard can offer "cellular modem" as the router WAN — essential
+// for onboarding a device that has no internet except the modem. Polled
+// live (the user may plug the modem in mid-wizard).
+func (s *Server) handleSetupModem(w http.ResponseWriter, r *http.Request) {
+	st := network.ModemStatus{Present: false}
+	if mp, ok := s.backend.(modemStatusProvider); ok {
+		if got, err := mp.ModemStatus(r.Context()); err == nil {
+			st = got
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": st})
 }
 
 // handleSetupCapability runs the hardware probe and returns it.
@@ -172,6 +188,12 @@ type completeRequest struct {
 	WAN struct {
 		Interface string `json:"interface"`
 		Mode      string `json:"mode,omitempty"`
+		// Modem carries cellular settings when Mode == "modem".
+		Modem *struct {
+			APN      string `json:"apn"`
+			PIN      string `json:"pin"`
+			Username string `json:"username"`
+		} `json:"modem,omitempty"`
 	} `json:"wan"`
 }
 
@@ -231,6 +253,13 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		finished.Network.WAN = &config.WAN{
 			Interface: req.WAN.Interface,
 			Mode:      mode,
+		}
+		if mode == "modem" && req.WAN.Modem != nil {
+			finished.Network.WAN.Modem = &config.Modem{
+				APN:      req.WAN.Modem.APN,
+				PIN:      req.WAN.Modem.PIN,
+				Username: req.WAN.Modem.Username,
+			}
 		}
 	default:
 		writeError(w, http.StatusUnprocessableEntity, "invalid_role",

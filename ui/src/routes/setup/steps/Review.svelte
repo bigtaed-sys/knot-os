@@ -15,7 +15,9 @@
 		{#if wizard.role === 'wifi-router'}
 			<div class="flex items-center gap-2 whitespace-nowrap">
 				<span>🌐 {$_('setup.role.internet')}</span>
-				<span class="text-emerald-500">━━ {wizard.wanInterface || 'eth0'} ━━</span>
+				<span class="text-emerald-500">
+					{wizard.wanMode === 'modem' ? '📶 SIM' : '━━ ' + (wizard.wanInterface || 'eth0') + ' ━━'}
+				</span>
 				<span class="text-brand-500">📡 {wizard.deviceName}</span>
 				<span class="text-emerald-500">⋯ «{wizard.apSSID}» ⋯</span>
 				<span>📱💻 {$_('setup.role.your_devices')}</span>
@@ -36,9 +38,11 @@
 		<li class="flex items-start gap-2">
 			<i class="bi bi-check2-circle text-emerald-500 mt-0.5"></i>
 			<span>
-				{wizard.role === 'wifi-router'
-					? $_('setup.review.line_router', { values: { iface: wizard.wanInterface, mode: wizard.wanMode } })
-					: $_('setup.review.line_extender', { values: { ssid: wizard.uplinkSSID } })}
+				{wizard.role !== 'wifi-router'
+					? $_('setup.review.line_extender', { values: { ssid: wizard.uplinkSSID } })
+					: wizard.wanMode === 'modem'
+						? $_('setup.review.line_modem', { values: { apn: wizard.wanApn || 'auto' } })
+						: $_('setup.review.line_router', { values: { iface: wizard.wanInterface, mode: wizard.wanMode } })}
 			</span>
 		</li>
 		<li class="flex items-start gap-2">

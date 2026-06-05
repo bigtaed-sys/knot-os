@@ -69,9 +69,13 @@ class WizardStore {
 
 	// Step-3 connection — router WAN.
 	wanInterface = $state('');
-	wanMode = $state<'dhcp' | 'pppoe'>('dhcp');
+	wanMode = $state<'dhcp' | 'pppoe' | 'modem'>('dhcp');
 	wanPppoeUser = $state('');
 	wanPppoePass = $state('');
+	// Cellular modem WAN (wanMode === 'modem').
+	wanApn = $state('');
+	wanPin = $state('');
+	wanModemUser = $state('');
 
 	// Step-4 AP.
 	apSSID = $state('KnotNet');
@@ -128,6 +132,8 @@ class WizardStore {
 					uplinkSSID: this.uplinkSSID,
 					wanInterface: this.wanInterface,
 					wanMode: this.wanMode,
+					wanApn: this.wanApn,
+					wanModemUser: this.wanModemUser,
 					apSSID: this.apSSID,
 					apBand: this.apBand,
 					apChannel: this.apChannel,
@@ -152,6 +158,8 @@ class WizardStore {
 			if (typeof j.uplinkSSID === 'string') this.uplinkSSID = j.uplinkSSID;
 			if (typeof j.wanInterface === 'string') this.wanInterface = j.wanInterface;
 			if (j.wanMode) this.wanMode = j.wanMode;
+			if (typeof j.wanApn === 'string') this.wanApn = j.wanApn;
+			if (typeof j.wanModemUser === 'string') this.wanModemUser = j.wanModemUser;
 			if (typeof j.apSSID === 'string') this.apSSID = j.apSSID;
 			if (j.apBand) this.apBand = j.apBand;
 			if (typeof j.apChannel === 'number') this.apChannel = j.apChannel;

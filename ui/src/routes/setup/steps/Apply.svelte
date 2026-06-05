@@ -35,10 +35,13 @@
 		};
 		if (wizard.role === 'wifi-router') {
 			body.wan = {
-				interface: wizard.wanInterface,
+				interface: wizard.wanMode === 'modem' ? '' : wizard.wanInterface,
 				mode: wizard.wanMode,
 				...(wizard.wanMode === 'pppoe'
 					? { pppoe_user: wizard.wanPppoeUser, pppoe_pass: wizard.wanPppoePass }
+					: {}),
+				...(wizard.wanMode === 'modem'
+					? { modem: { apn: wizard.wanApn, pin: wizard.wanPin, username: wizard.wanModemUser } }
 					: {})
 			};
 		} else {

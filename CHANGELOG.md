@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.16-1] — 2026-06-06
+
+### Added
+
+- **Cellular modem in the setup wizard.** The first-run wizard's connection step now asks "how does this router get internet?" with an **Ethernet** vs **Cellular modem** choice (router mode). Picking the modem shows live detection (model / carrier / SIM-lock) polled from ModemManager, plus an APN field (and PIN when the SIM is locked). This is what makes onboarding a cellular-only device possible — e.g. a remote site with no wired internet — since the wizard runs over the device's own AP and brings the modem up as the WAN. The post-setup Modem page remains for changing it later. `POST /setup/complete` and a new `GET /setup/modem` carry the cellular config through onboarding.
+
 ## [2026.06.16] — 2026-06-06
 
 ### Cellular modem WAN — Phase 1 (experimental)

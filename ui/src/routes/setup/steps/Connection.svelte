@@ -3,12 +3,28 @@
 	import { onMount, onDestroy } from 'svelte';
 	import StepCard from '$lib/components/wizard/StepCard.svelte';
 	import { apiGet } from '$lib/api';
-	import type { ScanResponse, CapabilityReport } from '$lib/types';
+	import type { ScanResponse, CapabilityReport, ModemStatus } from '$lib/types';
 	import { wizard } from '../wizard.svelte';
 
 	const linkedEths = $derived(wizard.cap?.eth.filter((e) => e.link) ?? []);
 
 	let capTimer: ReturnType<typeof setInterval> | null = null;
+	let modem = $state<ModemStatus>({ present: false, signal_percent: 0 });
+
+	// Poll for a USB cellular modem so the user can pick it as the WAN —
+	// essential when the device has no internet except the modem.
+	async function refreshModem() {
+		try {
+			const r = await apiGet<{ status: ModemStatus }>('/setup/modem', { timeoutMs: 4000 });
+			modem = r.status;
+		} catch {
+			// transient — keep previous.
+		}
+	}
+
+	function selectEthernet() {
+		if (wizard.wanMode === 'modem') wizard.wanMode = 'dhcp';
+	}
 
 	async function scan() {
 		wizard.scanning = true;
@@ -48,7 +64,11 @@
 		}
 		if (wizard.role === 'wifi-router') {
 			refreshCap();
-			capTimer = setInterval(refreshCap, 3000);
+			refreshModem();
+			capTimer = setInterval(() => {
+				refreshCap();
+				refreshModem();
+			}, 3000);
 			if (!wizard.wanInterface && linkedEths.length > 0) {
 				wizard.wanInterface = linkedEths[0].name;
 			}
@@ -70,6 +90,9 @@
 			return true;
 		}
 		if (wizard.role === 'wifi-router') {
+			// Cellular: APN is optional (carriers auto-provision), so the
+			// step is always completable once modem mode is chosen.
+			if (wizard.wanMode === 'modem') return true;
 			return wizard.wanInterface !== '';
 		}
 		return false;
@@ -95,6 +118,72 @@
 	{canNext}
 >
 	{#if wizard.role === 'wifi-router'}
+		<!-- WAN type: Ethernet vs Cellular modem -->
+		<div class="space-y-2">
+			<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+				{$_('setup.conn.wan_type_label')}
+			</div>
+			<div class="grid grid-cols-2 gap-2">
+				<button
+					type="button"
+					onclick={selectEthernet}
+					class="p-3 rounded-md border text-sm text-left
+						{wizard.wanMode !== 'modem'
+							? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700'}"
+				>
+					<div class="font-medium flex items-center gap-2"><i class="bi bi-ethernet"></i>{$_('setup.conn.wan_ethernet')}</div>
+					<div class="text-xs text-zinc-500 mt-0.5">{$_('setup.conn.wan_ethernet_desc')}</div>
+				</button>
+				<button
+					type="button"
+					onclick={() => (wizard.wanMode = 'modem')}
+					class="relative p-3 rounded-md border text-sm text-left
+						{wizard.wanMode === 'modem'
+							? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700'}"
+				>
+					<div class="font-medium flex items-center gap-2">
+						<i class="bi bi-sim"></i>{$_('setup.conn.wan_modem')}
+						{#if modem.present}
+							<span class="badge badge-ok text-[10px]">{$_('setup.conn.modem_detected')}</span>
+						{/if}
+					</div>
+					<div class="text-xs text-zinc-500 mt-0.5">{$_('setup.conn.wan_modem_desc')}</div>
+				</button>
+			</div>
+		</div>
+
+		{#if wizard.wanMode === 'modem'}
+			<!-- Cellular modem WAN -->
+			<div class="space-y-3">
+				{#if modem.present}
+					<div class="p-3 rounded-md bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-sm text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+						<i class="bi bi-sim"></i>
+						<span>
+							{modem.manufacturer || ''} {modem.model || $_('modem.unknown_model')}
+							{#if modem.operator}· {modem.operator}{/if}
+							{#if modem.lock_required === 'sim-pin'}· <i class="bi bi-lock"></i> {$_('setup.conn.modem_locked')}{/if}
+						</span>
+					</div>
+				{:else}
+					<div class="p-3 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-sm text-amber-800 dark:text-amber-300">
+						<i class="bi bi-info-circle mr-1.5"></i>{$_('setup.conn.modem_none')}
+					</div>
+				{/if}
+				<div>
+					<label class="text-sm font-medium text-zinc-700 dark:text-zinc-300" for="setup-apn">{$_('modem.apn')}</label>
+					<input id="setup-apn" class="input mt-1 font-mono" bind:value={wizard.wanApn} placeholder="internet" />
+					<p class="text-xs text-zinc-500 mt-1">{$_('modem.apn_help')}</p>
+				</div>
+				{#if modem.lock_required === 'sim-pin'}
+					<div>
+						<label class="text-sm font-medium text-zinc-700 dark:text-zinc-300" for="setup-pin">{$_('modem.pin')}</label>
+						<input id="setup-pin" class="input mt-1 font-mono" type="password" bind:value={wizard.wanPin} placeholder={$_('modem.pin_placeholder')} />
+					</div>
+				{/if}
+			</div>
+		{:else}
 		<!-- WAN interface picker -->
 		<div class="space-y-2">
 			<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
@@ -171,6 +260,7 @@
 				</button>
 			</div>
 		</div>
+		{/if}
 	{:else}
 		<!-- Extender uplink scan -->
 		<div class="flex items-center justify-between mb-2">
