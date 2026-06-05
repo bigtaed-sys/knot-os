@@ -73,12 +73,42 @@ run_user() {
     fi
 }
 
-# Use whatever Go is installed; never try to auto-download a toolchain
-# (offline builders, or a go.mod directive newer than the local Go,
-# would otherwise abort with "toolchain not available"). Preserved into
-# run_user via sudo -E. The module go-directive is kept conservative so
-# a stock distro Go suffices.
+# Never let Go try to auto-download a toolchain — offline/locked-down
+# builders fail with "toolchain not available". We provision the right
+# Go ourselves (ensure_go below) and then use exactly that one.
+# Preserved into run_user via sudo -E.
 export GOTOOLCHAIN=local
+
+# Minimum Go the modules need (golang.org/x/* + fsnotify require 1.25).
+# Distro apt often ships an older Go (Ubuntu 24.04 = 1.22), which can't
+# build those deps — so install an official Go into /usr/local when the
+# system one is too old, and symlink it onto the secure_path so both
+# root and the build user (via sudo) resolve it.
+GO_MIN_MINOR=25
+GO_INSTALL_VERSION="1.25.0"
+
+ensure_go() {
+    local have_minor
+    have_minor="$(go version 2>/dev/null | sed -nE 's/.*go1\.([0-9]+).*/\1/p')"
+    if [[ -n "$have_minor" && "$have_minor" -ge "$GO_MIN_MINOR" ]]; then
+        echo "    Go $(go version | grep -oE 'go[0-9.]+') is recent enough"
+        return
+    fi
+    echo "==> Installing Go ${GO_INSTALL_VERSION} (system Go is ${have_minor:+1.$have_minor}${have_minor:-absent}, need >= 1.${GO_MIN_MINOR})"
+    local tarball="go${GO_INSTALL_VERSION}.linux-amd64.tar.gz"
+    local cached="/tmp/knot-${tarball}"
+    if [[ ! -f "$cached" ]]; then
+        curl -fL --progress-bar -o "$cached" "https://go.dev/dl/${tarball}"
+    fi
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf "$cached"
+    ln -sf /usr/local/go/bin/go /usr/local/bin/go
+    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+    hash -r 2>/dev/null || true
+    echo "    now using $(go version)"
+}
+
+ensure_go
 
 # ---- 1. Build UI ----------------------------------------------------------
 
