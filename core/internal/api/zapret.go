@@ -90,7 +90,10 @@ func (s *Server) handlePutZapret(w http.ResponseWriter, r *http.Request) {
 		Strategy:   body.Strategy,
 		CustomArgs: body.CustomArgs,
 	}
-	status, payload := s.commitConfig(r.Context(), incoming, "api:put-zapret")
+	// Zapret only drives nfqws + its own isolated nft table, so persist
+	// and reconcile without a full network re-apply — toggling it must
+	// not drop every Wi-Fi client.
+	status, payload := s.persistConfigLight(incoming)
 	writeJSON(w, status, payload)
 }
 
@@ -121,7 +124,7 @@ func (s *Server) handleAutoTuneZapret(w http.ResponseWriter, r *http.Request) {
 	// triggers is a no-op (the winner is already running).
 	incoming := cfg
 	incoming.Network.Zapret = &config.Zapret{Enabled: true, Strategy: winner}
-	if status, payload := s.commitConfig(r.Context(), incoming, "api:zapret-autotune"); status != http.StatusOK {
+	if status, payload := s.persistConfigLight(incoming); status != http.StatusOK {
 		writeJSON(w, status, payload)
 		return
 	}

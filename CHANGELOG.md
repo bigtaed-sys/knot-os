@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.06.15-3] — 2026-06-06
+
+### Fixed
+
+- **Changing any Zapret setting no longer drops the Wi-Fi.** Toggling Zapret, switching strategy, or running auto-detect went through the full transactional config-apply, which re-applies the whole network stack — restarting hostapd and kicking every wireless client. Zapret only drives the `nfqws` daemon and its own isolated nft table, so it now persists + reconciles **without** a `backend.Apply`, exactly like the profiles/devices endpoints. Wi-Fi stays up.
+
 ## [2026.06.15-2] — 2026-06-05
 
 ### Changed

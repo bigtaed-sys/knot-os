@@ -68,6 +68,36 @@ func (s *Server) handlePutPortForwards(w http.ResponseWriter, r *http.Request) {
 // apply coordinator (snapshot + health-check + auto-rollback) or, when
 // no coordinator is wired, falls back to the legacy direct apply.
 //
+// persistConfigLight saves a config change and reconciles the soft
+// subsystems (DNS, routing, zapret) WITHOUT going through backend.Apply.
+// backend.Apply re-applies the whole network stack — restarting hostapd
+// and dropping every Wi-Fi client — which is the right thing for changes
+// that touch interfaces/AP/NAT, but wrong for changes that only drive a
+// side daemon (zapret's nfqws + its own nft table). Mirrors how the
+// profiles/devices endpoints persist + fireConfigApplied without a
+// network bounce.
+func (s *Server) persistConfigLight(incoming config.Config) (int, map[string]any) {
+	s.mu.RLock()
+	incoming.Auth = s.cfg.Auth
+	s.mu.RUnlock()
+
+	if err := incoming.Validate(); err != nil {
+		return http.StatusUnprocessableEntity, map[string]any{
+			"error": map[string]any{"code": "invalid_config", "message": err.Error()},
+		}
+	}
+	if err := config.SaveWith(s.configPath, incoming, s.sealer); err != nil {
+		return http.StatusInternalServerError, map[string]any{
+			"error": map[string]any{"code": "save_failed", "message": err.Error()},
+		}
+	}
+	s.mu.Lock()
+	s.cfg = incoming
+	s.mu.Unlock()
+	s.fireConfigApplied(incoming)
+	return http.StatusOK, map[string]any{"config": incoming}
+}
+
 // Returns the HTTP status and response body for the caller to write.
 func (s *Server) commitConfig(ctx context.Context, incoming config.Config, reason string) (int, map[string]any) {
 	s.mu.RLock()
