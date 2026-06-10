@@ -249,6 +249,14 @@ $rsyncCmd = "mkdir -p '$dst' && rsync -a --delete " +
     "--exclude='image/stage-knot/00-install-knotd/files/knotd' " +
     "--exclude='image/stage-knot/00-install-knotd/files/knotctl' " +
     "--exclude='image/stage-knot/01-install-plugins/files/' " +
+    # build.sh stages these binaries as root (install -m 755), so a
+    # later user-run rsync --delete can't remove them ("Permission
+    # denied"). They're build outputs, never in source — exclude them
+    # from the sync entirely. (02-recovery/files IS committed source,
+    # so it is deliberately NOT excluded.)
+    "--exclude='image/stage-knot/03-singbox/files/' " +
+    "--exclude='image/stage-knot/04-xray/files/' " +
+    "--exclude='image/stage-knot/05-zapret/files/' " +
     "'$src' '$dst'"
 wsl-run-as-user $rsyncCmd
 
