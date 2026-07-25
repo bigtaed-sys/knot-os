@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.5] — 2026-07-25
+
+### Changed
+
+- **In-page tabs — pages are no longer one long stack of cards.** New reusable `Tabs` sub-navigation (scrolls sideways on narrow screens so it never overflows). The **Modem** page is the first converted: **Status / Data / Network / Settings** tabs instead of eight stacked cards, so each screen is short and mobile-friendly. Rolling out to the other dense pages (Routing, System, Protection, VPN) next.
+
 ## [2026.07.4] — 2026-07-25
 
 ### Added

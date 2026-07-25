@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, apiPost, ApiError } from '$lib/api';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type { ModemResponse, ModemStatus, ModemUsage, ModemNetwork } from '$lib/types';
 
 	let status = $state<ModemStatus>({ present: false, signal_percent: 0 });
@@ -177,6 +178,17 @@
 	);
 	const overLimit = $derived(limitBytes > 0 && !!usage && usage.total_bytes >= limitBytes);
 
+	// In-page tabs — keeps the page short instead of one long card stack.
+	let activeTab = $state('status');
+	const tabList = $derived([
+		{ id: 'status', label: $_('modem.tab_status'), icon: 'bi-broadcast' },
+		{ id: 'data', label: $_('modem.tab_data'), icon: 'bi-bar-chart-line' },
+		{ id: 'network', label: $_('modem.tab_network'), icon: 'bi-reception-4' },
+		{ id: 'settings', label: $_('modem.tab_settings'), icon: 'bi-sliders2' }
+	]);
+	// The Save button applies config fields, which all live on Settings.
+	const showSave = $derived(activeTab === 'settings');
+
 	const stateColor = $derived(
 		status.state === 'connected'
 			? 'badge-ok'
@@ -221,6 +233,9 @@
 		</div>
 	{/if}
 
+	<Tabs tabs={tabList} bind:active={activeTab} />
+
+	{#if activeTab === 'status'}
 	<!-- Live status -->
 	<section class="surface p-5 mb-5">
 		<div class="flex items-center gap-4">
@@ -276,7 +291,9 @@
 			</div>
 		{/if}
 	</section>
+	{/if}
 
+	{#if activeTab === 'data'}
 	<!-- Data usage + signal history -->
 	{#if usage}
 		<section class="surface p-5 mb-5">
@@ -327,8 +344,12 @@
 				</div>
 			{/if}
 		</section>
+	{:else}
+		<p class="text-sm text-zinc-500 dark:text-zinc-400">{$_('modem.usage_none')}</p>
+	{/if}
 	{/if}
 
+	{#if activeTab === 'settings'}
 	<!-- Settings -->
 	<section class="surface p-5 mb-5 space-y-4">
 		<label class="flex items-start gap-3 cursor-pointer">
@@ -420,7 +441,9 @@
 			</div>
 		</div>
 	</section>
+	{/if}
 
+	{#if activeTab === 'network'}
 	<!-- Network selection: access tech + band lock -->
 	{#if network && network.supported_modes.length > 0}
 		<section class="surface p-5 mb-5 space-y-4" class:opacity-60={networkBusy}>
@@ -477,8 +500,12 @@
 				</div>
 			{/if}
 		</section>
+	{:else}
+		<p class="text-sm text-zinc-500 dark:text-zinc-400">{$_('modem.network_none')}</p>
+	{/if}
 	{/if}
 
+	{#if activeTab === 'settings'}
 	<!-- USSD (prepaid balance) -->
 	{#if status.present}
 		<section class="surface p-5 mb-5 space-y-3">
@@ -508,6 +535,7 @@
 			</a>
 		</section>
 	{/if}
+	{/if}
 
 	{#if ctlError}
 		<div class="flex items-start gap-2 p-3 mb-4 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
@@ -528,14 +556,16 @@
 		</div>
 	{/if}
 
-	<div class="flex items-center gap-2">
-		<button class="btn-primary" type="button" disabled={saving} onclick={save}>
-			{#if saving}<span class="spinner"></span>{$_('common.saving')}{:else}<i class="bi bi-check2"></i>{$_('modem.save')}{/if}
-		</button>
-		{#if savedFlash}
-			<span class="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1 ml-1">
-				<i class="bi bi-check-circle-fill"></i>{$_('common.saved')}
-			</span>
-		{/if}
-	</div>
+	{#if showSave}
+		<div class="flex items-center gap-2">
+			<button class="btn-primary" type="button" disabled={saving} onclick={save}>
+				{#if saving}<span class="spinner"></span>{$_('common.saving')}{:else}<i class="bi bi-check2"></i>{$_('modem.save')}{/if}
+			</button>
+			{#if savedFlash}
+				<span class="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1 ml-1">
+					<i class="bi bi-check-circle-fill"></i>{$_('common.saved')}
+				</span>
+			{/if}
+		</div>
+	{/if}
 {/if}
