@@ -93,10 +93,10 @@ func (b *LinuxBackend) modemWatchOnce(ctx context.Context, lastReset *time.Time)
 		return
 	}
 
-	switch kv["modem.generic.state"] {
-	case "connected":
+	switch modemActionFor(kv["modem.generic.state"]) {
+	case modemNoAction:
 		b.setModemErr("")
-	case "failed":
+	case modemReset:
 		// A failed modem won't recover on its own (typical after a SIM
 		// hot-swap). Reset it so ModemManager re-initialises the module.
 		reason := kv["modem.generic.state-failed-reason"]
@@ -107,10 +107,32 @@ func (b *LinuxBackend) modemWatchOnce(ctx context.Context, lastReset *time.Time)
 			b.r.runIgnoreError(ctx, "mmcli", "-m", idx, "--reset")
 			*lastReset = time.Now()
 		}
-	default:
+	case modemReconnect:
 		// Present but not connected (disabled / registered / searching /
 		// disconnecting …). Bring the data link back up.
 		b.reconnectModemWAN(ctx)
+	}
+}
+
+// modemAction is the watchdog's decision for a given ModemManager state.
+type modemAction int
+
+const (
+	modemNoAction  modemAction = iota // connected — leave it
+	modemReset                        // failed — reset to re-initialise
+	modemReconnect                    // present but down — re-dial
+)
+
+// modemActionFor maps a ModemManager modem state to the keepalive action.
+// Pure (no I/O) so the watchdog's core decision is unit-testable.
+func modemActionFor(state string) modemAction {
+	switch state {
+	case "connected":
+		return modemNoAction
+	case "failed":
+		return modemReset
+	default:
+		return modemReconnect
 	}
 }
 

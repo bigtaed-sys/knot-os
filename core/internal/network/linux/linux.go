@@ -26,7 +26,7 @@ import (
 //   - Close stops every supervised process (used on shutdown).
 type LinuxBackend struct {
 	logger *log.Logger
-	r      *runner
+	r      commandRunner
 
 	// HTTPPort is the port knotd's HTTP server is listening on. The
 	// captive-portal nftables rules redirect 80/443 to this port.

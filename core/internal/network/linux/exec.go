@@ -12,6 +12,16 @@ import (
 	"time"
 )
 
+// commandRunner is how the backend shells out. The production impl is
+// *runner (real exec); tests inject a fake to drive mmcli/ip/nft output
+// without touching the host. Every LinuxBackend command goes through this
+// (b.r), so faking it makes the modem/apply paths unit-testable.
+type commandRunner interface {
+	run(ctx context.Context, name string, args ...string) (string, error)
+	runOK(ctx context.Context, name string, args ...string) error
+	runIgnoreError(ctx context.Context, name string, args ...string)
+}
+
 // runner is a thin wrapper around exec.CommandContext that adds a
 // default timeout and capture of stdout/stderr. It centralizes how
 // every Linux subsystem call is logged.
@@ -19,6 +29,8 @@ type runner struct {
 	logger  *log.Logger
 	timeout time.Duration
 }
+
+var _ commandRunner = (*runner)(nil)
 
 func newRunner(logger *log.Logger) *runner {
 	if logger == nil {
