@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ApiError, ApiTimeoutError, API_BASE } from '$lib/api';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type {
 		SystemStatus,
 		TLSInfo,
@@ -13,6 +15,14 @@
 		NotifyState,
 		NotifyPIN
 	} from '$lib/types';
+
+	let activeTab = $state('overview');
+	const tabList = $derived([
+		{ id: 'overview', label: $_('system.tab_overview'), icon: 'bi-info-circle' },
+		{ id: 'updates', label: $_('system.tab_updates'), icon: 'bi-arrow-repeat' },
+		{ id: 'security', label: $_('system.tab_security'), icon: 'bi-shield-lock' },
+		{ id: 'more', label: $_('system.tab_more'), icon: 'bi-three-dots' }
+	]);
 
 	let status = $state<SystemStatus | null>(null);
 	let tls = $state<TLSInfo | null>(null);
@@ -408,7 +418,12 @@
 	<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{$_('system.subtitle')}</p>
 </header>
 
-<div class="space-y-5">
+<div>
+	<Tabs tabs={tabList} bind:active={activeTab} />
+
+	{#key activeTab}
+	<div in:fade={{ duration: 140 }} class="space-y-5">
+	{#if activeTab === 'overview'}
 	<!-- Info -->
 	<section class="surface p-5">
 		<h2 class="font-semibold mb-3 flex items-center gap-2">
@@ -430,7 +445,9 @@
 			<div class="spinner text-zinc-400"></div>
 		{/if}
 	</section>
+	{/if}
 
+	{#if activeTab === 'security'}
 	<!-- Security / TLS -->
 	{#if tlsAvailable}
 		<section class="surface p-5">
@@ -482,6 +499,9 @@
 		</section>
 	{/if}
 
+	{/if}
+
+	{#if activeTab === 'more'}
 	<!-- Channel scanner -->
 	{#if status && status.role === 'wifi-router'}
 		<section class="surface p-5">
@@ -705,6 +725,9 @@
 		</section>
 	{/if}
 
+	{/if}
+
+	{#if activeTab === 'updates'}
 	<!-- Updates: GitHub auto + manual upload -->
 	<section class="surface p-5">
 		<h2 class="font-semibold mb-1 flex items-center gap-2">
@@ -854,6 +877,9 @@
 		{/if}
 	</section>
 
+	{/if}
+
+	{#if activeTab === 'security'}
 	<!-- Rescue keypair -->
 	{#if rescueAvailable}
 		<section class="surface p-5">
@@ -934,6 +960,9 @@
 		</section>
 	{/if}
 
+	{/if}
+
+	{#if activeTab === 'overview'}
 	<!-- Power -->
 	<section class="surface p-5">
 		<h2 class="font-semibold mb-3 flex items-center gap-2">
@@ -951,4 +980,7 @@
 			</button>
 		</div>
 	</section>
+	{/if}
+	</div>
+	{/key}
 </div>
