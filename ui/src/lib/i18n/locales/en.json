@@ -13,6 +13,7 @@
 		"portforward": "Port forwarding",
 		"zapret": "Zapret (DPI bypass)",
 		"modem": "Cellular modem",
+		"messages": "Messages",
 		"guests": "Guests",
 		"network": "Network",
 		"plugins": "Plugins",
@@ -740,6 +741,7 @@
 		"sms_delete": "Delete",
 		"sms_send": "Send",
 		"sms_text_ph": "Message…",
+		"open_messages": "Open Messages",
 		"as_wan": "Use the modem as the internet uplink (WAN)",
 		"as_wan_help": "Routes all internet traffic through the cellular modem instead of Ethernet.",
 		"apn": "APN",
@@ -753,6 +755,17 @@
 		"switch_warning": "Switching the WAN to the modem reconfigures the uplink — wired internet stops being used. Make sure the modem + SIM are ready.",
 		"save": "Save & apply",
 		"disabled": "Modem endpoints are disabled in this build."
+	},
+	"messages": {
+		"title": "Messages",
+		"subtitle": "SMS through the cellular modem.",
+		"new": "New message",
+		"no_modem": "No cellular modem detected. Messages are available when a modem is present.",
+		"empty": "No conversations yet.",
+		"pick": "Pick a conversation, or start a new one.",
+		"to_ph": "Recipient +7…",
+		"message_ph": "Type a message…",
+		"delete": "Delete"
 	},
 	"common": {
 		"yes": "Yes",

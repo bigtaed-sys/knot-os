@@ -81,9 +81,12 @@ func (b *LinuxBackend) ListSMS(ctx context.Context) ([]network.SMS, error) {
 		out = append(out, network.SMS{
 			ID:        id,
 			Number:    skv["sms.content.number"],
-			Text:      skv["sms.content.text"],
+			Text:      unescapeGLib(skv["sms.content.text"]),
 			Timestamp: skv["sms.properties.timestamp"],
-			Sent:      skv["sms.pdu-type"] == "submit",
+			// mmcli's -K reports direction via pdu-type ("submit" = we
+			// sent it, "deliver" = received); older versions only set
+			// properties.state ("sent"/"received"). Check both.
+			Sent: skv["sms.pdu-type"] == "submit" || skv["sms.properties.state"] == "sent",
 		})
 	}
 	// Newest first by numeric index (higher = more recent).
@@ -147,6 +150,51 @@ func parseCreatedSMSPath(out string) string {
 // mmcli create string.
 func sanitizeSMSField(s string) string {
 	return strings.TrimSpace(strings.NewReplacer("'", "", "\n", " ", "\r", " ").Replace(s))
+}
+
+// unescapeGLib reverses the escaping mmcli's -K output applies to
+// non-ASCII text (GLib g_strescape): non-printable/high bytes become
+// octal "\NNN", plus the usual "\n\t\r\\\"" escapes. Cyrillic SMS arrive
+// as UTF-8 bytes shown that way (e.g. "\320\240"); decoding back to raw
+// bytes reconstructs the UTF-8 string.
+func unescapeGLib(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b = append(b, s[i])
+			continue
+		}
+		c := s[i+1]
+		switch {
+		case c >= '0' && c <= '7':
+			// Up to 3 octal digits.
+			j, val := i+1, 0
+			for j < len(s) && j < i+4 && s[j] >= '0' && s[j] <= '7' {
+				val = val*8 + int(s[j]-'0')
+				j++
+			}
+			b = append(b, byte(val))
+			i = j - 1
+		case c == 'n':
+			b = append(b, '\n')
+			i++
+		case c == 't':
+			b = append(b, '\t')
+			i++
+		case c == 'r':
+			b = append(b, '\r')
+			i++
+		case c == '\\' || c == '"' || c == '\'':
+			b = append(b, c)
+			i++
+		default:
+			b = append(b, '\\')
+		}
+	}
+	return string(b)
 }
 
 // ModemNetwork reports the modem's access-tech and band capabilities plus

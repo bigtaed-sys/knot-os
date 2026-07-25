@@ -24,6 +24,19 @@ func TestParseUSSDResponse(t *testing.T) {
 	}
 }
 
+func TestUnescapeGLib(t *testing.T) {
+	// \320\240 = 0xD0 0xA0 = "Р", \320\276 = 0xD0 0xBE = "о".
+	if got := unescapeGLib(`\320\240\320\276`); got != "Ро" {
+		t.Errorf("cyrillic: got %q", got)
+	}
+	if got := unescapeGLib(`hi\n\tthere`); got != "hi\n\tthere" {
+		t.Errorf("named escapes: got %q", got)
+	}
+	if got := unescapeGLib("plain ascii"); got != "plain ascii" {
+		t.Errorf("ascii: got %q", got)
+	}
+}
+
 func TestSendUSSD(t *testing.T) {
 	f := &fakeRunner{respond: func(name string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "--3gpp-ussd-initiate") {
@@ -49,8 +62,10 @@ func TestListSMS(t *testing.T) {
 		"mmcli -m 0 --messaging-list-sms -K": `modem.messaging.sms.value[1] : /org/freedesktop/ModemManager1/SMS/2
 modem.messaging.sms.value[2] : /org/freedesktop/ModemManager1/SMS/5
 `,
-		"mmcli -s 2 -K": "sms.content.number : +70001112233\nsms.content.text : Your code is 4821\nsms.pdu-type : deliver\nsms.properties.timestamp : 2026-07-25T10:00:00+03:00\n",
-		"mmcli -s 5 -K": "sms.content.number : +70009998877\nsms.content.text : sent one\nsms.pdu-type : submit\n",
+		// Received, Cyrillic text octal-escaped by mmcli -K ("Ро").
+		"mmcli -s 2 -K": "sms.content.number : +70001112233\nsms.content.text : \\320\\240\\320\\276\nsms.pdu-type : deliver\nsms.properties.timestamp : 2026-07-25T10:00:00+03:00\n",
+		// Sent, direction reported only via properties.state.
+		"mmcli -s 5 -K": "sms.content.number : +70009998877\nsms.content.text : sent one\nsms.properties.state : sent\n",
 	})}
 	msgs, err := newTestBackend(f).ListSMS(context.Background())
 	if err != nil {
@@ -63,8 +78,11 @@ modem.messaging.sms.value[2] : /org/freedesktop/ModemManager1/SMS/5
 	if msgs[0].ID != "5" || !msgs[0].Sent {
 		t.Errorf("first = %+v, want id 5 sent", msgs[0])
 	}
-	if msgs[1].Text != "Your code is 4821" || msgs[1].Sent {
-		t.Errorf("second = %+v", msgs[1])
+	if msgs[1].Sent {
+		t.Errorf("id 2 should be received, got sent")
+	}
+	if msgs[1].Text != "Ро" {
+		t.Errorf("cyrillic not decoded: got %q", msgs[1].Text)
 	}
 }
 

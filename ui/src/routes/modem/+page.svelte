@@ -2,14 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, apiPut, apiPost, apiDelete, ApiError } from '$lib/api';
-	import type {
-		ModemResponse,
-		ModemStatus,
-		ModemUsage,
-		ModemNetwork,
-		ModemSMS
-	} from '$lib/types';
+	import { apiGet, apiPut, apiPost, ApiError } from '$lib/api';
+	import type { ModemResponse, ModemStatus, ModemUsage, ModemNetwork } from '$lib/types';
 
 	let status = $state<ModemStatus>({ present: false, signal_percent: 0 });
 	let asWAN = $state(false);
@@ -31,11 +25,6 @@
 	let ussdCode = $state('');
 	let ussdResp = $state<string | null>(null);
 	let ussdBusy = $state(false);
-	// SMS
-	let sms = $state<ModemSMS[]>([]);
-	let smsNumber = $state('');
-	let smsText = $state('');
-	let smsBusy = $state(false);
 	let ctlError = $state<string | null>(null);
 
 	function ctlErr(e: unknown): string {
@@ -51,15 +40,6 @@
 			network = await apiGet<ModemNetwork>('/modem/network', { timeoutMs: 8000 });
 		} catch {
 			network = null; // backend without a modem controller / no modem
-		}
-	}
-
-	async function loadSMS() {
-		try {
-			const r = await apiGet<{ messages: ModemSMS[] }>('/modem/sms', { timeoutMs: 8000 });
-			sms = r.messages ?? [];
-		} catch {
-			/* transient */
 		}
 	}
 
@@ -109,30 +89,6 @@
 			ctlError = ctlErr(e);
 		} finally {
 			ussdBusy = false;
-		}
-	}
-
-	async function sendSMS() {
-		if (!smsNumber.trim() || !smsText.trim()) return;
-		smsBusy = true;
-		ctlError = null;
-		try {
-			await apiPost('/modem/sms', { number: smsNumber, text: smsText }, { timeoutMs: 30000 });
-			smsText = '';
-			await loadSMS();
-		} catch (e) {
-			ctlError = ctlErr(e);
-		} finally {
-			smsBusy = false;
-		}
-	}
-
-	async function deleteSMS(id: string) {
-		try {
-			await apiDelete(`/modem/sms/${id}`);
-			await loadSMS();
-		} catch (e) {
-			ctlError = ctlErr(e);
 		}
 	}
 
@@ -234,7 +190,6 @@
 	onMount(() => {
 		refresh(true);
 		loadNetwork();
-		loadSMS();
 		timer = setInterval(() => refresh(false), 5000);
 	});
 	onDestroy(() => {
@@ -548,51 +503,9 @@
 					{ussdResp}
 				</div>
 			{/if}
-		</section>
-
-		<!-- SMS -->
-		<section class="surface p-5 mb-5 space-y-3">
-			<div class="flex items-center justify-between">
-				<span class="label !mb-0">{$_('modem.sms')}</span>
-				<button class="text-xs text-brand-600 dark:text-brand-400 hover:underline" type="button" onclick={loadSMS}>
-					<i class="bi bi-arrow-clockwise"></i>{$_('modem.sms_refresh')}
-				</button>
-			</div>
-
-			{#if sms.length === 0}
-				<p class="text-sm text-zinc-500 dark:text-zinc-400">{$_('modem.sms_empty')}</p>
-			{:else}
-				<ul class="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-72 overflow-y-auto">
-					{#each sms as m (m.id)}
-						<li class="py-2 flex items-start gap-3">
-							<i class="bi {m.sent ? 'bi-arrow-up-right text-sky-500' : 'bi-arrow-down-left text-emerald-500'} mt-0.5"></i>
-							<div class="flex-1 min-w-0">
-								<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-									{m.number}{#if m.timestamp} · {new Date(m.timestamp).toLocaleString()}{/if}
-								</div>
-								<div class="text-sm break-words">{m.text}</div>
-							</div>
-							<button
-								class="text-zinc-400 hover:text-red-500 shrink-0"
-								type="button"
-								title={$_('modem.sms_delete')}
-								onclick={() => deleteSMS(m.id)}
-							>
-								<i class="bi bi-trash"></i>
-							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-
-			<div class="flex flex-col sm:flex-row gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-				<input class="input font-mono sm:w-44" bind:value={smsNumber} placeholder="+7…" />
-				<input class="input flex-1" bind:value={smsText} placeholder={$_('modem.sms_text_ph')} />
-				<button class="btn-ghost shrink-0" type="button" disabled={smsBusy} onclick={sendSMS}>
-					{#if smsBusy}<span class="spinner"></span>{:else}<i class="bi bi-send"></i>{/if}
-					{$_('modem.sms_send')}
-				</button>
-			</div>
+			<a href="/messages" class="text-sm text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1">
+				<i class="bi bi-chat-dots"></i>{$_('modem.open_messages')}
+			</a>
 		</section>
 	{/if}
 

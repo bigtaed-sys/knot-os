@@ -30,6 +30,7 @@
 		{ path: '/portforwards', icon: 'bi-box-arrow-in-right', label: 'nav.portforward' },
 		{ path: '/zapret', icon: 'bi-magic', label: 'nav.zapret' },
 		{ path: '/modem', icon: 'bi-sim', label: 'nav.modem' },
+		{ path: '/messages', icon: 'bi-chat-dots', label: 'nav.messages' },
 		{ path: '/guests', icon: 'bi-people', label: 'nav.guests' },
 		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }

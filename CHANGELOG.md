@@ -4,6 +4,17 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.4] — 2026-07-25
+
+### Added
+
+- **Messages — a full SMS view.** SMS moved off the Modem page into its own **Messages** tab: conversations grouped by number with a thread view (incoming/outgoing bubbles), inline compose, and delete. The Modem page keeps USSD and links across.
+
+### Fixed
+
+- **Cyrillic (and other non-ASCII) SMS render correctly.** ModemManager's `-K` output octal-escapes non-ASCII bytes (e.g. `\320\240`); the text is now decoded back to UTF-8 instead of showing the escapes.
+- **Sent messages are no longer shown as incoming.** Direction now also honours ModemManager's `properties.state` (`sent`/`received`), not just `pdu-type`, so outgoing SMS are recognised.
+
 ## [2026.07.3-1] — 2026-07-25
 
 ### Fixed
