@@ -28,6 +28,11 @@
 	let tuneResults = $state<ZapretTuneResult[]>([]);
 	let tuneWinner = $state<string | null>(null);
 
+	// The no-bypass baseline row, and whether it already reaches the test
+	// hosts (i.e. the bypass isn't needed here).
+	const offResult = $derived(tuneResults.find((r) => r.strategy === 'off'));
+	const baselineWorks = $derived(!!offResult && offResult.ok === offResult.total);
+
 	async function refresh() {
 		loading = true;
 		try {
@@ -38,6 +43,11 @@
 			useCustom = customArgs.trim().length > 0;
 			presets = r.presets ?? [];
 			status = r.status;
+			// Re-show the last auto-tune run (survives a page reload).
+			if (r.autotune) {
+				tuneResults = r.autotune.results ?? [];
+				tuneWinner = r.autotune.winner || null;
+			}
 			error = null;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
@@ -116,8 +126,9 @@
 				{ timeoutMs: 180000 }
 			);
 			tuneResults = r.results ?? [];
-			tuneWinner = r.winner;
-			// The server already enabled + saved the winner; reflect it.
+			tuneWinner = r.winner || null;
+			// The server already enabled + saved the winner (or turned the
+			// bypass off if nothing worked); reflect it.
 			await refresh();
 		} catch (e) {
 			if (e instanceof ApiError) {
@@ -208,7 +219,24 @@
 				</div>
 			{/if}
 
-			{#if tuneResults.length > 0}
+			{#if tuneResults.length > 0 && !tuning}
+				<!-- Honest verdict: winner / bypass-not-needed / nothing worked -->
+				{#if tuneWinner}
+					<div class="mb-2 text-sm text-emerald-700 dark:text-emerald-400 flex items-start gap-2">
+						<i class="bi bi-trophy-fill mt-0.5"></i>
+						<span>{$_('zapret.autotune_winner')}</span>
+					</div>
+				{:else if baselineWorks}
+					<div class="mb-2 rounded-lg bg-sky-50 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/30 p-3 text-sm text-sky-800 dark:text-sky-300 flex items-start gap-2">
+						<i class="bi bi-info-circle mt-0.5"></i>
+						<span>{$_('zapret.autotune_not_needed')}</span>
+					</div>
+				{:else}
+					<div class="mb-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 p-3 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
+						<i class="bi bi-exclamation-triangle mt-0.5"></i>
+						<span>{$_('zapret.autotune_none')}</span>
+					</div>
+				{/if}
 				<div class="mb-3 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
 					{#each tuneResults as r (r.strategy)}
 						<div

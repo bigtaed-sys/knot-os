@@ -101,34 +101,44 @@ func (m *Manager) AutoTune(ctx context.Context, s Settings) ([]TuneResult, strin
 		}
 	}
 
-	winner := bestStrategy(results, strategies)
+	winner := bestStrategy(results)
 
-	// Leave the winner applied and running.
-	wargs, wtcp, wudp, err := BuildInvocation(Settings{Enabled: true, Strategy: winner}, m.base)
-	if err == nil {
-		if err := m.runner.Start(ctx, binPath, wargs, s.WANInterface, wtcp, wudp); err == nil {
-			m.lastKey = strings.Join([]string{s.WANInterface, wtcp, wudp, strings.Join(wargs, "\x00")}, "\x01")
+	if winner != "" {
+		// Leave the winning strategy applied and running.
+		wargs, wtcp, wudp, err := BuildInvocation(Settings{Enabled: true, Strategy: winner}, m.base)
+		if err == nil {
+			if err := m.runner.Start(ctx, binPath, wargs, s.WANInterface, wtcp, wudp); err == nil {
+				m.lastKey = strings.Join([]string{s.WANInterface, wtcp, wudp, strings.Join(wargs, "\x00")}, "\x01")
+			}
 		}
+	} else {
+		// Nothing beat the censor — don't leave a non-working strategy
+		// running (and don't claim a bogus winner). Turn the bypass off.
+		_ = m.runner.Stop(ctx)
+		m.lastKey = ""
 	}
+
+	// Cache the run so the UI can show it again after a page reload.
+	m.lastTune = results
+	m.lastWinner = winner
+	m.lastTuneAt = time.Now()
 	return results, winner, nil
 }
 
-// bestStrategy picks the strategy (never "off") with the most
-// successful probes, breaking ties by lowest summed latency. Falls
-// back to the first available strategy when nothing scored.
-func bestStrategy(results []TuneResult, strategies []Strategy) string {
+// bestStrategy picks the strategy (never "off") with the most successful
+// probes, breaking ties by lowest summed latency. Returns "" when NO
+// strategy landed a single probe — an honest "nothing worked" rather than
+// a meaningless fallback that the UI would present as a winner.
+func bestStrategy(results []TuneResult) string {
 	best := ""
 	var bestRes TuneResult
 	for _, r := range results {
-		if r.Strategy == "off" {
+		if r.Strategy == "off" || r.OK == 0 {
 			continue
 		}
 		if best == "" || r.OK > bestRes.OK || (r.OK == bestRes.OK && r.LatencyMS < bestRes.LatencyMS) {
 			best, bestRes = r.Strategy, r
 		}
-	}
-	if best == "" && len(strategies) > 0 {
-		return strategies[0].ID
 	}
 	return best
 }

@@ -435,6 +435,11 @@ export interface ZapretResponse {
 	strategy: string;
 	custom_args: string;
 	presets: ZapretPreset[];
+	autotune?: {
+		results: ZapretTuneResult[];
+		winner: string; // "" when no strategy worked
+		at: string;
+	} | null;
 	status: {
 		running: boolean;
 		binary_present: boolean;
@@ -451,7 +456,7 @@ export interface ZapretTuneResult {
 }
 
 export interface ZapretAutoTuneResponse {
-	winner: string;
+	winner: string; // "" when no strategy worked
 	results: ZapretTuneResult[];
 }
 

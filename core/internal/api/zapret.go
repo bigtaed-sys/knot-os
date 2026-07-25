@@ -63,18 +63,30 @@ func (s *Server) handleGetZapret(w http.ResponseWriter, _ *http.Request) {
 	}
 	presets := make([]presetJSON, 0)
 	running, binaryPresent := false, false
+	var autotune map[string]any
 	if s.zapret != nil {
 		for _, p := range zapret.LoadStrategies(s.zapret.BaseDir()) {
 			presets = append(presets, presetJSON{ID: p.ID, Name: p.Name, Desc: p.Desc})
 		}
 		running = s.zapret.Running()
 		binaryPresent = s.zapret.BinaryPresent()
+		// Surface the last auto-tune run so the score table survives a
+		// page reload (winner "" means nothing beat the censor).
+		if results, winner, at, ok := s.zapret.LastTune(); ok {
+			zapret.SortByScore(results)
+			autotune = map[string]any{
+				"results": results,
+				"winner":  winner,
+				"at":      at.UTC().Format("2006-01-02T15:04:05Z"),
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":     z.Enabled,
 		"strategy":    z.Strategy,
 		"custom_args": z.CustomArgs,
 		"presets":     presets,
+		"autotune":    autotune,
 		"status": map[string]any{
 			"running":        running,
 			"binary_present": binaryPresent,

@@ -4,6 +4,13 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.1-3] — 2026-07-25
+
+### Fixed
+
+- **Auto-detect gives an honest verdict.** It used to always crown a "winner" — even when every strategy scored 0/4 it silently picked the first preset, so the result was meaningless. It now says plainly what happened: a real winner (highlighted + enabled), "the sites already work without a bypass" (baseline passed), or "no strategy got through — bypass left off" (nothing worked). It no longer leaves a non-working strategy running.
+- **Auto-detect results survive a page reload.** The score table was component-only state and vanished on refresh. The last run (results + winner + timestamp) is now cached server-side and re-shown on load.
+
 ## [2026.07.1-2] — 2026-07-25
 
 ### Fixed

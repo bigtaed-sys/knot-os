@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Runner is the platform-specific hook that owns both the nfqws process
@@ -31,6 +32,24 @@ type Manager struct {
 	logger  *log.Logger
 	base    string
 	lastKey string // dedupe identical applies (args+iface)
+
+	// Last auto-tune run, cached so the UI can re-show the score table
+	// after a page reload (survives reloads, not a knotd restart).
+	lastTune   []TuneResult
+	lastWinner string
+	lastTuneAt time.Time
+}
+
+// LastTune returns the most recent auto-tune run (results, winner ID, and
+// when it ran). ok=false when auto-tune hasn't run since knotd started.
+// winner is "" when the run found no working strategy.
+func (m *Manager) LastTune() (results []TuneResult, winner string, at time.Time, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastTuneAt.IsZero() {
+		return nil, "", time.Time{}, false
+	}
+	return m.lastTune, m.lastWinner, m.lastTuneAt, true
 }
 
 // NewManager builds a Manager rooted at RuntimeDir. A nil runner makes
