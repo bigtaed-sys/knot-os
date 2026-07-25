@@ -10,11 +10,15 @@ import (
 )
 
 func TestParseUSSDResponse(t *testing.T) {
-	out := "successfully initiated new USSD session:\n    response: 'Balance 123.45 RUB'\n"
-	if got := parseUSSDResponse(out); got != "Balance 123.45 RUB" {
-		t.Errorf("got %q", got)
+	// "response:" label
+	if got := parseUSSDResponse("initiated new USSD session:\n    response: 'Balance 123.45 RUB'\n"); got != "Balance 123.45 RUB" {
+		t.Errorf("response label: got %q", got)
 	}
-	// No quoted response → whole trimmed output.
+	// "new reply from network:" label (real mmcli output)
+	if got := parseUSSDResponse("USSD session initiated; new reply from network: 'Уважаемый Клиент'"); got != "Уважаемый Клиент" {
+		t.Errorf("reply label: got %q", got)
+	}
+	// No quotes → whole trimmed output.
 	if got := parseUSSDResponse("  plain text  "); got != "plain text" {
 		t.Errorf("fallback got %q", got)
 	}

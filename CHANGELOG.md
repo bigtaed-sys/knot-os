@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.3-1] — 2026-07-25
+
+### Fixed
+
+- **USSD reply is now shown cleanly.** Some ModemManager versions label the reply "new reply from network: '…'" rather than "response: '…'"; the parser matched only the latter, so the whole mmcli line leaked into the UI. It now extracts the quoted reply regardless of the label.
+
 ## [2026.07.3] — 2026-07-25
 
 ### Added

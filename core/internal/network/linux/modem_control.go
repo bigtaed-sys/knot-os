@@ -40,17 +40,15 @@ func (b *LinuxBackend) SendUSSD(ctx context.Context, code string) (string, error
 	return resp, nil
 }
 
-// parseUSSDResponse pulls the quoted reply out of mmcli's USSD output,
-// e.g.  "    response: 'Balance 123.45'"  →  "Balance 123.45".
+// parseUSSDResponse pulls the quoted reply out of mmcli's USSD output.
+// The reply is always single-quoted, but the label varies by mmcli
+// version — "response: 'Balance 123'" or "new reply from network:
+// 'Balance 123'" — so we extract the quoted span rather than matching a
+// label. Falls back to the whole output when there are no quotes.
 func parseUSSDResponse(out string) string {
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(strings.ToLower(line), "response") {
-			continue
-		}
-		if i := strings.Index(line, "'"); i >= 0 {
-			if j := strings.LastIndex(line, "'"); j > i {
-				return strings.TrimSpace(line[i+1 : j])
-			}
+	if i := strings.IndexByte(out, '\''); i >= 0 {
+		if j := strings.LastIndexByte(out, '\''); j > i {
+			return strings.TrimSpace(out[i+1 : j])
 		}
 	}
 	return strings.TrimSpace(out)
