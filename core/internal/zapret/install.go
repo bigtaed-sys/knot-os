@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,9 +114,14 @@ var refreshTargets = []struct {
 	{"lists/ipset-all.txt", func(b string) string { return filepath.Join(ListsDir(b), "ipset-all.txt") }},
 }
 
-// strategyTargets maps each strategy ID to its upstream Flowseal .bat
-// filename. Refreshing re-pulls these so the catalogue tracks upstream
-// without a new knotd build (LoadStrategies converts them on load).
+// strategyContentsAPI lists the Flowseal repo root so a refresh can
+// discover EVERY strategy .bat upstream ships — the catalogue grows
+// (ALT7…ALT12, EXP, FAKE TLS AUTO ALT…) without a knotd change.
+const strategyContentsAPI = "https://api.github.com/repos/Flowseal/zapret-discord-youtube/contents/"
+
+// strategyTargets is the fallback set used when the GitHub contents API
+// can't be reached (rate-limited / offline). Keeps a refresh useful even
+// without live discovery. Maps strategy ID → upstream .bat filename.
 var strategyTargets = map[string]string{
 	"general":       "general.bat",
 	"alt":           "general (ALT).bat",
@@ -128,9 +134,79 @@ var strategyTargets = map[string]string{
 	"simple-fake":   "general (SIMPLE FAKE).bat",
 }
 
+// strategyFile is one upstream strategy to pull.
+type strategyFile struct {
+	id     string
+	rawURL string
+}
+
+// isStrategyBat reports whether an upstream filename is a strategy preset
+// (a "general*.bat"), excluding the service installer.
+func isStrategyBat(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".bat") &&
+		strings.HasPrefix(lower, "general") &&
+		lower != "service.bat"
+}
+
+// strategyIDFromFilename derives a stable ID from a Flowseal filename:
+// "general.bat"→"general", "general (ALT2).bat"→"alt2",
+// "general (FAKE TLS AUTO).bat"→"fake-tls-auto". Matches the seed IDs.
+func strategyIDFromFilename(name string) string {
+	base := strings.TrimSuffix(name, ".bat")
+	base = strings.TrimSpace(strings.TrimPrefix(base, "general"))
+	base = strings.NewReplacer("(", "", ")", "").Replace(base)
+	if strings.TrimSpace(base) == "" {
+		return "general"
+	}
+	return strings.ToLower(strings.Join(strings.Fields(base), "-"))
+}
+
+// discoverStrategyFiles enumerates every strategy .bat in the Flowseal
+// repo root via the GitHub contents API.
+func discoverStrategyFiles(ctx context.Context) ([]strategyFile, error) {
+	body, err := fetch(ctx, strategyContentsAPI, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var entries []struct {
+		Name        string `json:"name"`
+		DownloadURL string `json:"download_url"`
+		Type        string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, err
+	}
+	var out []strategyFile
+	for _, e := range entries {
+		if e.Type != "file" || !isStrategyBat(e.Name) {
+			continue
+		}
+		url := e.DownloadURL
+		if url == "" {
+			url = ListsRefreshBase + "/" + urlEscapePath(e.Name)
+		}
+		out = append(out, strategyFile{id: strategyIDFromFilename(e.Name), rawURL: url})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no strategy .bat files found upstream")
+	}
+	return out, nil
+}
+
+// fallbackStrategyFiles builds the pull list from the hardcoded set.
+func fallbackStrategyFiles() []strategyFile {
+	out := make([]strategyFile, 0, len(strategyTargets))
+	for id, fname := range strategyTargets {
+		out = append(out, strategyFile{id: id, rawURL: ListsRefreshBase + "/" + urlEscapePath(fname)})
+	}
+	return out
+}
+
 // RefreshStrategies re-pulls the strategy .bat files from upstream into
-// <base>/strategies, where LoadStrategies prefers them over the seed.
-// Returns the number updated.
+// <base>/strategies, where LoadStrategies prefers them over the seed. It
+// discovers the full upstream set live (falling back to the known set if
+// the listing API is unavailable). Returns the number updated.
 func RefreshStrategies(ctx context.Context, base string) (int, error) {
 	dir := filepath.Join(base, "strategies")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -138,26 +214,31 @@ func RefreshStrategies(ctx context.Context, base string) (int, error) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+
+	files, err := discoverStrategyFiles(cctx)
+	if err != nil {
+		// Rate-limited/offline listing → still refresh the known set.
+		files = fallbackStrategyFiles()
+	}
+
 	updated := 0
 	var errs []string
-	for id, fname := range strategyTargets {
-		url := ListsRefreshBase + "/" + urlEscapePath(fname)
-		data, err := fetch(cctx, url, 256<<10)
-		if err != nil {
+	for _, f := range files {
+		data, ferr := fetch(cctx, f.rawURL, 256<<10)
+		if ferr != nil {
 			// Upstream renamed/removed this one — keep the seed/existing
 			// copy and carry on rather than aborting the whole refresh.
-			errs = append(errs, fmt.Sprintf("%s: %v", id, err))
+			errs = append(errs, fmt.Sprintf("%s: %v", f.id, ferr))
 			continue
 		}
 		// Only overwrite when the download actually converts. A format
 		// change upstream must never clobber a working strategy with an
 		// unparseable file (LoadStrategies would then have to drop it).
 		if s, cerr := ConvertBat(string(data)); cerr != nil || len(s.Args) == 0 {
-			errs = append(errs, fmt.Sprintf("%s: unparseable after download", id))
+			errs = append(errs, fmt.Sprintf("%s: unparseable after download", f.id))
 			continue
 		}
-		dst := filepath.Join(dir, id+".bat")
-		if err := writeAtomic(dst, data, 0o644); err != nil {
+		if err := writeAtomic(filepath.Join(dir, f.id+".bat"), data, 0o644); err != nil {
 			return updated, err
 		}
 		updated++
@@ -169,15 +250,59 @@ func RefreshStrategies(ctx context.Context, base string) (int, error) {
 	return updated, nil
 }
 
-// Refresh re-pulls both the domain lists and the strategy .bat files
-// from upstream Flowseal. Returns the total number of files updated.
-func Refresh(ctx context.Context, base string) (int, error) {
-	n, err := RefreshLists(ctx, base)
-	if err != nil {
-		return n, err
+// binContentsAPI lists Flowseal's bin/ dir so a refresh can pull every
+// fake-payload .bin. The newer strategies reference bins the seed doesn't
+// carry (stun2, ACTIVE_*_UDP, quic_initial_tencent…); without them nfqws
+// fails to open the payload and won't start on those strategies.
+const binContentsAPI = "https://api.github.com/repos/Flowseal/zapret-discord-youtube/contents/bin"
+
+// RefreshBins re-pulls every fake-payload .bin from upstream into the
+// on-disk bin/ dir. Best-effort by design: the caller treats a failure as
+// non-fatal (the seed bins cover the common strategies). Returns the
+// number updated.
+func RefreshBins(ctx context.Context, base string) (int, error) {
+	dir := FakeDir(base)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return 0, err
 	}
-	m, err := RefreshStrategies(ctx, base)
-	return n + m, err
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	body, err := fetch(cctx, binContentsAPI, 1<<20)
+	if err != nil {
+		return 0, err
+	}
+	var entries []struct {
+		Name        string `json:"name"`
+		DownloadURL string `json:"download_url"`
+		Type        string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return 0, err
+	}
+	updated := 0
+	var errs []string
+	for _, e := range entries {
+		if e.Type != "file" || !strings.HasSuffix(strings.ToLower(e.Name), ".bin") {
+			continue
+		}
+		url := e.DownloadURL
+		if url == "" {
+			url = ListsRefreshBase + "/bin/" + urlEscapePath(e.Name)
+		}
+		data, ferr := fetch(cctx, url, 1<<20)
+		if ferr != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", e.Name, ferr))
+			continue
+		}
+		if err := writeAtomic(filepath.Join(dir, e.Name), data, 0o644); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	if updated == 0 && len(errs) > 0 {
+		return 0, fmt.Errorf("no bins refreshed (%s)", strings.Join(errs, "; "))
+	}
+	return updated, nil
 }
 
 // RefreshLists re-downloads the domain lists from the upstream Flowseal
@@ -215,6 +340,9 @@ func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// GitHub's API rejects requests with no User-Agent (HTTP 403); harmless
+	// on the raw.githubusercontent list/strategy downloads too.
+	req.Header.Set("User-Agent", "knot-os")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

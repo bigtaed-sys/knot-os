@@ -54,9 +54,20 @@ var stratMeta = map[string]struct{ name, desc string }{
 	"simple-fake":   {"General (SIMPLE FAKE)", "Простой fake — самый лёгкий вариант."},
 }
 
-// stratOrder fixes the dropdown order (general first).
+// stratOrder fixes the dropdown order (general first). IDs not listed
+// here (newer upstream additions) sort after these, alphabetically.
 var stratOrder = []string{
 	"general", "alt", "alt2", "alt3", "alt4", "alt5", "alt6", "fake-tls-auto", "simple-fake",
+}
+
+// displayName derives a readable name for a strategy ID that has no
+// curated entry in stratMeta: "general"→"General", "alt7"→"General
+// (ALT7)", "fake-tls-auto-alt"→"General (FAKE TLS AUTO ALT)".
+func displayName(id string) string {
+	if id == "general" {
+		return "General"
+	}
+	return "General (" + strings.ToUpper(strings.ReplaceAll(id, "-", " ")) + ")"
 }
 
 // LoadStrategies reads the strategy catalogue. A disk copy under
@@ -130,7 +141,10 @@ func LoadStrategies(base string) []Strategy {
 		if m, ok := stratMeta[id]; ok {
 			s.Name, s.Desc = m.name, m.desc
 		} else {
-			s.Name = id
+			// Newer Flowseal strategies we don't have curated copy for
+			// (ALT7…ALT12, EXP, FAKE TLS AUTO ALT…) still get a readable
+			// name derived from the ID, e.g. "alt7" → "General (ALT7)".
+			s.Name = displayName(id)
 		}
 		out = append(out, s)
 	}

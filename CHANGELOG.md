@@ -4,6 +4,14 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.1-2] — 2026-07-25
+
+### Fixed
+
+- **"Update from Flowseal" now pulls the full strategy catalogue.** The refresh used a hardcoded list of 9 `.bat` files, but Flowseal now ships ~21 (ALT7–ALT12, EXP, FAKE TLS AUTO ALT/ALT2/ALT3, SIMPLE FAKE ALT/ALT2…). It now discovers every `general*.bat` in the repo via the GitHub contents API (falling back to the known set if that's unavailable), so the strategy dropdown matches upstream. New strategies without curated copy get a readable name derived from the filename (e.g. `General (ALT10)`).
+- **Refresh also pulls the fake-payload `bin/` files** the newer strategies reference (`ACTIVE_DISCORD_UDP.bin`, `stun2.bin`, `quic_initial_tencent_com.bin`, …). Without them nfqws couldn't open the payload and wouldn't start on those strategies — even the current `general` references a bin the seed didn't carry.
+- **The refresh result is no longer a confusing single number.** It reported the combined lists+strategies file count ("Updated 14"), which read as "14 strategies" when the list showed 9. It now reports strategies and lists separately.
+
 ## [2026.07.1-1] — 2026-07-25
 
 ### Fixed

@@ -83,8 +83,14 @@
 		refreshMsg = null;
 		error = null;
 		try {
-			const r = await apiPost<{ updated: number }>('/zapret/refresh', {}, { timeoutMs: 60000 });
-			refreshMsg = $_('zapret.refresh_done', { values: { n: r.updated } });
+			const r = await apiPost<{ updated: number; lists: number; strategies: number }>(
+				'/zapret/refresh',
+				{},
+				{ timeoutMs: 60000 }
+			);
+			refreshMsg = $_('zapret.refresh_done', {
+				values: { lists: r.lists, strategies: r.strategies }
+			});
 			setTimeout(() => (refreshMsg = null), 3000);
 		} catch (e) {
 			if (e instanceof ApiError) {

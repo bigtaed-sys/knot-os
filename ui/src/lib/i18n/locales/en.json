@@ -696,7 +696,7 @@
 		"lists_help": "Domain lists AND the strategy presets are pulled live from the upstream Flowseal repo and stored on disk — so they stay current without a firmware update. The presets above are the real Flowseal strategies, converted to nfqws.",
 		"refresh": "Update from Flowseal",
 		"refreshing": "Updating…",
-		"refresh_done": "Updated {n} file(s) from Flowseal.",
+		"refresh_done": "Updated from Flowseal: {strategies} strategies, {lists} lists.",
 		"save": "Save & apply",
 		"tip": "Tip: enable, pick General, save — then test YouTube/Discord. No luck? Switch to ALT/ALT2 and save again. The lists only cover YouTube + Discord, so the rest of your traffic is untouched.",
 		"disabled": "Zapret endpoints are disabled in this build."

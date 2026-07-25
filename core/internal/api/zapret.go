@@ -149,10 +149,22 @@ func (s *Server) handleRefreshZapret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "zapret_disabled", "engine not available")
 		return
 	}
-	n, err := zapret.Refresh(r.Context(), s.zapret.BaseDir())
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "refresh_failed", err.Error())
+	base := s.zapret.BaseDir()
+	nLists, errL := zapret.RefreshLists(r.Context(), base)
+	nStrat, errS := zapret.RefreshStrategies(r.Context(), base)
+	// Fake-payload bins that the newer strategies reference — best-effort,
+	// the seed covers the common ones, so a failure here never fails the
+	// refresh.
+	nBins, _ := zapret.RefreshBins(r.Context(), base)
+	if errL != nil && errS != nil {
+		writeError(w, http.StatusBadGateway, "refresh_failed",
+			"lists: "+errL.Error()+"; strategies: "+errS.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"lists":      nLists,
+		"strategies": nStrat,
+		"bins":       nBins,
+		"updated":    nLists + nStrat + nBins,
+	})
 }
