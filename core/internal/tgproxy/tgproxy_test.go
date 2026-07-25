@@ -8,7 +8,7 @@ import (
 func TestBuildArgs_MTProto(t *testing.T) {
 	args := BuildArgs(Settings{Mode: ModeMTProto, Port: 9443, Secret: "00112233445566778899aabbccddeeff", LinkIP: "192.168.42.1"})
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"--mode mtproto", "--port 9443", "--secret 00112233445566778899aabbccddeeff", "--link-ip 192.168.42.1", "--host 0.0.0.0"} {
+	for _, want := range []string{"--mode mtproto", "--port 9443", "--secret 00112233445566778899aabbccddeeff", "--link-ip 192.168.42.1", "--host 0.0.0.0", "--cf-proxy", "--cf-proxy-first"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args missing %q: %s", want, joined)
 		}

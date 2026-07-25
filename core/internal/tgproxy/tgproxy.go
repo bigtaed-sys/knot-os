@@ -83,6 +83,13 @@ func BuildArgs(s Settings) []string {
 		"--host", "0.0.0.0",
 		"--port", strconv.Itoa(port),
 		"--mode", string(mode),
+		// Route via Cloudflare using the binary's built-in domains
+		// (--cf-proxy with no --cf-domain falls back to the embedded
+		// defaults). This is what makes it work out of the box where the
+		// direct Telegram WebSocket route is DPI-blocked; --cf-proxy-first
+		// skips the blocked direct attempt so clients don't hang.
+		"--cf-proxy",
+		"--cf-proxy-first",
 	}
 	if mode == ModeMTProto {
 		args = append(args, "--secret", s.Secret)

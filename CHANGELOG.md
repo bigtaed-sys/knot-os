@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.8-1] — 2026-07-25
+
+### Fixed
+
+- **Telegram proxy now connects (Cloudflare route).** It only tried the direct Telegram WebSocket route, which is DPI-blocked in Russia, so clients hung on "connecting". It now runs with `--cf-proxy --cf-proxy-first`, using the binary's built-in Cloudflare relay domains — the same out-of-the-box behaviour as upstream Flowseal.
+
 ## [2026.07.8] — 2026-07-25
 
 ### Added
