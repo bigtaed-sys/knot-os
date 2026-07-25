@@ -76,6 +76,23 @@ type Network struct {
 	// Zapret configures the DPI-bypass engine (nfqws) used to reach
 	// YouTube/Discord through ISP throttling. Nil/disabled == off.
 	Zapret *Zapret `yaml:"zapret,omitempty" json:"zapret,omitempty"`
+	// TGProxy configures the local Telegram MTProto/SOCKS5 proxy that
+	// tunnels Telegram over WebSocket to bypass blocking. Nil == off.
+	TGProxy *TGProxy `yaml:"tgproxy,omitempty" json:"tgproxy,omitempty"`
+}
+
+// TGProxy holds the local Telegram-bypass proxy settings. The proxy
+// binary is a supervised sidecar (image-staged or downloaded); this
+// struct carries the user's on/off + listen/secret choices.
+type TGProxy struct {
+	// Enabled turns the proxy process on.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Mode is "mtproto" (default) or "socks5".
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Port is the LAN listen port. 0 → default.
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
+	// Secret is the 32-hex MTProto secret. Empty → generated on enable.
+	Secret string `yaml:"secret,omitempty" json:"secret,omitempty"`
 }
 
 // Zapret holds the DPI-circumvention (nfqws) settings. The actual

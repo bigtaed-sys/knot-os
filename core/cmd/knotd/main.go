@@ -39,6 +39,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/secrets"
 	"github.com/knot-os/knot-os/core/internal/singbox"
 	"github.com/knot-os/knot-os/core/internal/subscription"
+	"github.com/knot-os/knot-os/core/internal/tgproxy"
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/vpn"
@@ -956,6 +957,11 @@ func main() {
 	zapretMgr := zapret.NewManager(zapretRunner, logger)
 	apiSrv.SetZapretManager(zapretMgr)
 
+	// Telegram-bypass proxy (tg-ws-proxy) — a supervised sidecar, idle
+	// until a config with tgproxy enabled is applied.
+	tgproxyMgr := tgproxy.NewManager(netlinux.NewTGProxyRunner(), logger)
+	apiSrv.SetTGProxyManager(tgproxyMgr)
+
 	// Routing diagnostics endpoint — UI pulls per-device decisions
 	// and the kill-switch list from this. Closes over the live
 	// registries; reads happen on every GET /api/routing.
@@ -1431,6 +1437,24 @@ func main() {
 		}
 		if err := zapretMgr.Apply(ctx, zs); err != nil {
 			logger.Printf("zapret: apply: %v", err)
+		}
+
+		// Telegram-bypass proxy. LinkIP is the LAN gateway so clients on
+		// the network connect to the router; the tg:// link uses it too.
+		tgLinkIP := ""
+		if applied.Network.LAN != nil {
+			tgLinkIP = firstUsableIPv4(applied.Network.LAN.CIDR)
+		}
+		ts := tgproxy.Settings{LinkIP: tgLinkIP}
+		if applied.Network.TGProxy != nil {
+			t := applied.Network.TGProxy
+			ts.Enabled = t.Enabled
+			ts.Mode = tgproxy.Mode(t.Mode)
+			ts.Port = t.Port
+			ts.Secret = t.Secret
+		}
+		if err := tgproxyMgr.Apply(ctx, ts); err != nil {
+			logger.Printf("tgproxy: apply: %v", err)
 		}
 	})
 

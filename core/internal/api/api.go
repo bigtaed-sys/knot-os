@@ -36,6 +36,7 @@ import (
 	knottls "github.com/knot-os/knot-os/core/internal/tls"
 	"github.com/knot-os/knot-os/core/internal/update"
 	"github.com/knot-os/knot-os/core/internal/vpn"
+	"github.com/knot-os/knot-os/core/internal/tgproxy"
 	"github.com/knot-os/knot-os/core/internal/zapret"
 )
 
@@ -73,6 +74,7 @@ type Server struct {
 	bandwidth       *bandwidth.Tracker
 	modemMetrics    *modemmetrics.Tracker
 	zapret          *zapret.Manager
+	tgproxy         *tgproxy.Manager
 	guest           *guest.Registry
 	notify          *notify.Store
 	notifyBot       *notify.Bot
@@ -177,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountBandwidth(r)
 		s.MountPortForwards(r)
 		s.MountZapret(r)
+		s.MountTGProxy(r)
 		s.MountModem(r)
 	})
 
