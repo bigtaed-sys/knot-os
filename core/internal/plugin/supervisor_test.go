@@ -2,10 +2,39 @@ package plugin
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
+
+// sandboxProbe checks ONCE whether this environment can actually launch a
+// sandboxed plugin. The supervisor confines children with PID/IPC/UTS/NET
+// namespaces (applySandbox), which require privileges the process lacks on
+// an unprivileged host — GitHub Actions runners and WSL both refuse the
+// clone with EPERM ("operation not permitted"). knotd runs as root in
+// production so it's fine there; the tests just can't reproduce it
+// everywhere. On non-Linux, applySandbox is a no-op so the probe passes.
+var sandboxProbe = sync.OnceValue(func() bool {
+	cmd := exec.Command(os.Args[0], "knot-plugin-crash") // exits immediately
+	applySandbox(cmd, 0, 0, false)
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	_ = cmd.Wait()
+	return true
+})
+
+// requireSandbox skips a test that needs to launch a real sandboxed
+// process when the environment won't permit it, so an unprivileged CI
+// runner reports skip rather than a spurious failure.
+func requireSandbox(t *testing.T) {
+	t.Helper()
+	if !sandboxProbe() {
+		t.Skip("process sandbox unavailable here (unprivileged namespaces not permitted); exercised under root/CI-with-userns")
+	}
+}
 
 // TestMain lets the test binary re-exec itself as a fake plugin: when
 // invoked with a sentinel arg it behaves like a supervised plugin
@@ -68,6 +97,7 @@ func waitState(t *testing.T, s *Supervisor, id string, want State, d time.Durati
 }
 
 func TestSupervisorStartsAndStops(t *testing.T) {
+	requireSandbox(t)
 	s := newTestSupervisor(t, "sleepy")
 	s.Sync([]Plugin{sleeperPlugin("sleepy")})
 
@@ -89,6 +119,7 @@ func TestSupervisorStartsAndStops(t *testing.T) {
 }
 
 func TestSupervisorSyncStopsRemoved(t *testing.T) {
+	requireSandbox(t)
 	s := newTestSupervisor(t, "a", "b")
 	s.Sync([]Plugin{sleeperPlugin("a"), sleeperPlugin("b")})
 	waitState(t, s, "a", StateRunning, 5*time.Second)
@@ -113,6 +144,7 @@ func TestSupervisorSyncStopsRemoved(t *testing.T) {
 }
 
 func TestSupervisorRestartsOnCrash(t *testing.T) {
+	requireSandbox(t)
 	s := newTestSupervisor(t, "crasher")
 	p := Plugin{
 		Manifest: Manifest{
