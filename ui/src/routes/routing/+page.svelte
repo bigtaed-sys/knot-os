@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '$lib/api';
 	import { relativeTime } from '$lib/format';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type {
 		Subscription,
 		SubscriptionsResponse,
@@ -17,6 +19,13 @@
 	} from '$lib/types';
 
 	// --- state -----------------------------------------------------------------
+
+	let activeTab = $state('servers');
+	const tabList = $derived([
+		{ id: 'servers', label: $_('routing.tab_servers'), icon: 'bi-hdd-stack' },
+		{ id: 'assignments', label: $_('routing.tab_assignments'), icon: 'bi-diagram-3' },
+		{ id: 'devices', label: $_('routing.tab_devices'), icon: 'bi-pc-display' }
+	]);
 
 	let subs = $state<Subscription[]>([]);
 	let routing = $state<RoutingResponse>({ devices: [], missing_outbounds: [] });
@@ -390,6 +399,11 @@
 			</div>
 		{/if}
 
+		<Tabs tabs={tabList} bind:active={activeTab} />
+
+		{#key activeTab}
+			<div in:fade={{ duration: 140 }}>
+				{#if activeTab === 'servers'}
 		<!-- Add buttons -->
 		<div class="flex flex-wrap gap-2">
 			<button class="btn btn-primary" onclick={() => (showAddSub = true)}>
@@ -521,6 +535,9 @@
 			</div>
 		{/if}
 
+				{/if}
+
+				{#if activeTab === 'assignments'}
 		<!-- Profiles → server assignment -->
 		<section class="surface p-4 space-y-3">
 			<header>
@@ -572,6 +589,9 @@
 			</ul>
 		</section>
 
+				{/if}
+
+				{#if activeTab === 'devices'}
 		<!-- Devices status -->
 		<section class="surface p-4 space-y-3">
 			<header>
@@ -604,6 +624,9 @@
 				</ul>
 			{/if}
 		</section>
+				{/if}
+			</div>
+		{/key}
 	{/if}
 </div>
 

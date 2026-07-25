@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, apiPatch, apiDelete, ApiError } from '$lib/api';
 	import { relativeTime } from '$lib/format';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type {
 		VPNServer,
 		VPNPeer,
@@ -12,6 +14,12 @@
 		Profile,
 		ProfilesResponse
 	} from '$lib/types';
+
+	let activeTab = $state('server');
+	const tabList = $derived([
+		{ id: 'server', label: $_('vpn.tab_server'), icon: 'bi-router' },
+		{ id: 'peers', label: $_('vpn.tab_peers'), icon: 'bi-people' }
+	]);
 
 	let server = $state<VPNServer | null>(null);
 	let peers = $state<VPNPeer[]>([]);
@@ -223,6 +231,11 @@
 		<div class="spinner"></div>
 	</div>
 {:else}
+	<Tabs tabs={tabList} bind:active={activeTab} />
+
+	{#key activeTab}
+		<div in:fade={{ duration: 140 }}>
+			{#if activeTab === 'server'}
 	<!-- Server card -->
 	<section class="surface p-5 mb-5">
 		<div class="flex items-start justify-between gap-3 mb-4">
@@ -301,7 +314,9 @@
 			</div>
 		{/if}
 	</section>
+			{/if}
 
+			{#if activeTab === 'peers'}
 	<!-- Peers list -->
 	<section class="surface p-5">
 		<h2 class="font-semibold mb-4 flex items-center gap-2">
@@ -374,6 +389,9 @@
 			</div>
 		{/if}
 	</section>
+			{/if}
+		</div>
+	{/key}
 
 	{#if error}
 		<div class="mt-4 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
