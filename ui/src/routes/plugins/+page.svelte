@@ -1,9 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, apiDelete, API_BASE, ApiError } from '$lib/api';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type { Plugin, PluginsResponse } from '$lib/types';
+
+	let activeTab = $state('installed');
+	const tabList = $derived([
+		{ id: 'installed', label: $_('plugins.tab_installed'), icon: 'bi-puzzle' },
+		{ id: 'store', label: $_('plugins.tab_store'), icon: 'bi-bag' }
+	]);
 
 	let plugins = $state<Plugin[]>([]);
 	let loading = $state(true);
@@ -141,6 +149,11 @@
 	<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{$_('plugins.subtitle')}</p>
 </header>
 
+<Tabs tabs={tabList} bind:active={activeTab} />
+
+{#key activeTab}
+<div in:fade={{ duration: 140 }}>
+{#if activeTab === 'installed'}
 {#if loading}
 	<div class="flex items-center justify-center py-16 text-zinc-400">
 		<div class="spinner"></div>
@@ -236,7 +249,9 @@
 		{$_('plugins.v01_note')}
 	</p>
 {/if}
+{/if}
 
+{#if activeTab === 'store'}
 <!-- Store -->
 <section class="mt-8">
 	<h2 class="text-lg font-semibold flex items-center gap-2">
@@ -299,6 +314,9 @@
 		{/if}
 	{/if}
 </section>
+{/if}
+</div>
+{/key}
 
 <!-- Third-party install confirmation -->
 {#if confirmEntry}

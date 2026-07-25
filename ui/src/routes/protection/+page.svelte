@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPost, apiPatch, ApiError } from '$lib/api';
 	import { relativeTime } from '$lib/format';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type {
 		DNSStats,
 		DNSQuery,
@@ -12,6 +14,14 @@
 		Device,
 		DevicesResponse
 	} from '$lib/types';
+
+	let activeTab = $state('overview');
+	const tabList = $derived([
+		{ id: 'overview', label: $_('protection.tab_overview'), icon: 'bi-speedometer2' },
+		{ id: 'lists', label: $_('protection.tab_lists'), icon: 'bi-shield-slash' },
+		{ id: 'dns', label: $_('protection.tab_dns'), icon: 'bi-hdd-network' },
+		{ id: 'queries', label: $_('protection.tab_queries'), icon: 'bi-list-ul' }
+	]);
 
 	let stats = $state<DNSStats | null>(null);
 	let upstream = $state<DNSUpstream | null>(null);
@@ -270,6 +280,11 @@
 		</div>
 	</div>
 {:else if stats}
+	<Tabs tabs={tabList} bind:active={activeTab} />
+
+	{#key activeTab}
+	<div in:fade={{ duration: 140 }}>
+	{#if activeTab === 'overview'}
 	<!-- Stat tiles -->
 	<div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
 		<div class="surface p-4">
@@ -301,6 +316,9 @@
 		</div>
 	</div>
 
+	{/if}
+
+	{#if activeTab === 'lists'}
 	<!-- Top blocked + sources -->
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
 		<section class="surface p-5">
@@ -380,6 +398,9 @@
 		</section>
 	</div>
 
+	{/if}
+
+	{#if activeTab === 'dns'}
 	<!-- DNS upstream -->
 	{#if upstream}
 		<section class="surface p-5 mb-5">
@@ -476,6 +497,9 @@
 		</section>
 	{/if}
 
+	{/if}
+
+	{#if activeTab === 'queries'}
 	<!-- Queries -->
 	<section class="surface p-5">
 		<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
@@ -553,4 +577,7 @@
 			</div>
 		{/if}
 	</section>
+	{/if}
+	</div>
+	{/key}
 {/if}
