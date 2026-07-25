@@ -490,6 +490,21 @@ export interface ModemUsage {
 	signal: ModemSignalSample[];
 }
 
+export interface ModemSMS {
+	id: string;
+	number: string;
+	text: string;
+	timestamp?: string;
+	sent: boolean;
+}
+
+export interface ModemNetwork {
+	supported_modes: string[];
+	current_modes: string[];
+	supported_bands: string[];
+	current_bands: string[];
+}
+
 export interface ModemResponse {
 	as_wan: boolean;
 	apn: string;

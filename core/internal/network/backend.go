@@ -127,6 +127,35 @@ type ModemStatus struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
+// SMS is one stored short message (received or sent).
+type SMS struct {
+	// ID is the ModemManager SMS index, used to delete it.
+	ID string `json:"id"`
+	// Number is the peer (sender for received, recipient for sent).
+	Number string `json:"number"`
+	// Text is the message body.
+	Text string `json:"text"`
+	// Timestamp is the carrier-provided time (received messages).
+	Timestamp string `json:"timestamp,omitempty"`
+	// Sent is true for outgoing messages (pdu-type "submit").
+	Sent bool `json:"sent"`
+}
+
+// ModemNetwork describes the modem's access-tech / band capabilities and
+// current selection, for the "prefer 4G / lock band" controls.
+type ModemNetwork struct {
+	// SupportedModes is the set of individual techs the modem supports
+	// ("2g","3g","4g","5g"), derived from ModemManager's mode combos.
+	SupportedModes []string `json:"supported_modes"`
+	// CurrentModes is the currently-allowed tech list. Empty/all-supported
+	// means "auto".
+	CurrentModes []string `json:"current_modes"`
+	// SupportedBands / CurrentBands are ModemManager band identifiers
+	// (e.g. "eutran-1", "eutran-3"). CurrentBands is ["any"] when unlocked.
+	SupportedBands []string `json:"supported_bands"`
+	CurrentBands   []string `json:"current_bands"`
+}
+
 // WANStatus is the runtime state of the Ethernet WAN interface in
 // wifi-router mode.
 type WANStatus struct {

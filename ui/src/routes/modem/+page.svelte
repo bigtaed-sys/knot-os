@@ -2,8 +2,14 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
-	import { apiGet, apiPut, ApiError } from '$lib/api';
-	import type { ModemResponse, ModemStatus, ModemUsage } from '$lib/types';
+	import { apiGet, apiPut, apiPost, apiDelete, ApiError } from '$lib/api';
+	import type {
+		ModemResponse,
+		ModemStatus,
+		ModemUsage,
+		ModemNetwork,
+		ModemSMS
+	} from '$lib/types';
 
 	let status = $state<ModemStatus>({ present: false, signal_percent: 0 });
 	let asWAN = $state(false);
@@ -17,6 +23,118 @@
 	let cycleResetDay = $state(1);
 	let usage = $state<ModemUsage | null>(null);
 	let routerMode = $state(true);
+
+	// Network selection (access tech + bands)
+	let network = $state<ModemNetwork | null>(null);
+	let networkBusy = $state(false);
+	// USSD (prepaid balance)
+	let ussdCode = $state('');
+	let ussdResp = $state<string | null>(null);
+	let ussdBusy = $state(false);
+	// SMS
+	let sms = $state<ModemSMS[]>([]);
+	let smsNumber = $state('');
+	let smsText = $state('');
+	let smsBusy = $state(false);
+	let ctlError = $state<string | null>(null);
+
+	function ctlErr(e: unknown): string {
+		if (e instanceof ApiError) {
+			const b = e.body as { error?: { message?: string } } | undefined;
+			return b?.error?.message ?? e.message;
+		}
+		return e instanceof Error ? e.message : String(e);
+	}
+
+	async function loadNetwork() {
+		try {
+			network = await apiGet<ModemNetwork>('/modem/network', { timeoutMs: 8000 });
+		} catch {
+			network = null; // backend without a modem controller / no modem
+		}
+	}
+
+	async function loadSMS() {
+		try {
+			const r = await apiGet<{ messages: ModemSMS[] }>('/modem/sms', { timeoutMs: 8000 });
+			sms = r.messages ?? [];
+		} catch {
+			/* transient */
+		}
+	}
+
+	async function applyModes(modes: string[]) {
+		networkBusy = true;
+		ctlError = null;
+		try {
+			await apiPut('/modem/network', { modes }, { timeoutMs: 30000 });
+			await loadNetwork();
+		} catch (e) {
+			ctlError = ctlErr(e);
+		} finally {
+			networkBusy = false;
+		}
+	}
+
+	async function toggleBand(band: string) {
+		if (!network) return;
+		const cur = new Set(network.current_bands.filter((b) => b !== 'any'));
+		if (cur.has(band)) cur.delete(band);
+		else cur.add(band);
+		networkBusy = true;
+		ctlError = null;
+		try {
+			await apiPut('/modem/network', { bands: [...cur] }, { timeoutMs: 30000 });
+			await loadNetwork();
+		} catch (e) {
+			ctlError = ctlErr(e);
+		} finally {
+			networkBusy = false;
+		}
+	}
+
+	async function runUSSD() {
+		if (!ussdCode.trim()) return;
+		ussdBusy = true;
+		ussdResp = null;
+		ctlError = null;
+		try {
+			const r = await apiPost<{ response: string }>(
+				'/modem/ussd',
+				{ code: ussdCode.trim() },
+				{ timeoutMs: 30000 }
+			);
+			ussdResp = r.response;
+		} catch (e) {
+			ctlError = ctlErr(e);
+		} finally {
+			ussdBusy = false;
+		}
+	}
+
+	async function sendSMS() {
+		if (!smsNumber.trim() || !smsText.trim()) return;
+		smsBusy = true;
+		ctlError = null;
+		try {
+			await apiPost('/modem/sms', { number: smsNumber, text: smsText }, { timeoutMs: 30000 });
+			smsText = '';
+			await loadSMS();
+		} catch (e) {
+			ctlError = ctlErr(e);
+		} finally {
+			smsBusy = false;
+		}
+	}
+
+	async function deleteSMS(id: string) {
+		try {
+			await apiDelete(`/modem/sms/${id}`);
+			await loadSMS();
+		} catch (e) {
+			ctlError = ctlErr(e);
+		}
+	}
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -115,6 +233,8 @@
 
 	onMount(() => {
 		refresh(true);
+		loadNetwork();
+		loadSMS();
 		timer = setInterval(() => refresh(false), 5000);
 	});
 	onDestroy(() => {
@@ -345,6 +465,142 @@
 			</div>
 		</div>
 	</section>
+
+	<!-- Network selection: access tech + band lock -->
+	{#if network && network.supported_modes.length > 0}
+		<section class="surface p-5 mb-5 space-y-4" class:opacity-60={networkBusy}>
+			<div>
+				<span class="label">{$_('modem.network_mode')}</span>
+				<div class="flex flex-wrap gap-2 mt-1">
+					<button
+						type="button"
+						disabled={networkBusy}
+						onclick={() => applyModes([])}
+						class="px-4 py-2 rounded-md border text-sm
+							{network.current_modes.length === network.supported_modes.length
+							? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+							: 'border-zinc-200 dark:border-zinc-700'}"
+					>
+						{$_('modem.network_auto')}
+					</button>
+					{#each network.supported_modes as m (m)}
+						<button
+							type="button"
+							disabled={networkBusy}
+							onclick={() => applyModes([m])}
+							class="px-4 py-2 rounded-md border text-sm uppercase
+								{network.current_modes.length === 1 && network.current_modes[0] === m
+								? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+								: 'border-zinc-200 dark:border-zinc-700'}"
+						>
+							{m}
+						</button>
+					{/each}
+				</div>
+				<p class="help">{$_('modem.network_mode_help')}</p>
+			</div>
+
+			{#if network.supported_bands.length > 0}
+				<div>
+					<span class="label">{$_('modem.bands')}</span>
+					<div class="flex flex-wrap gap-1.5 mt-1">
+						{#each network.supported_bands as band (band)}
+							<button
+								type="button"
+								disabled={networkBusy}
+								onclick={() => toggleBand(band)}
+								class="px-2.5 py-1 rounded-md border text-xs font-mono
+									{network.current_bands.includes(band)
+									? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+									: 'border-zinc-200 dark:border-zinc-700 text-zinc-500'}"
+							>
+								{band}
+							</button>
+						{/each}
+					</div>
+					<p class="help">{$_('modem.bands_help')}</p>
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	<!-- USSD (prepaid balance) -->
+	{#if status.present}
+		<section class="surface p-5 mb-5 space-y-3">
+			<div>
+				<span class="label">{$_('modem.ussd')}</span>
+				<div class="flex gap-2">
+					<input
+						class="input font-mono flex-1"
+						bind:value={ussdCode}
+						placeholder="*100#"
+						onkeydown={(e) => e.key === 'Enter' && runUSSD()}
+					/>
+					<button class="btn-ghost shrink-0" type="button" disabled={ussdBusy} onclick={runUSSD}>
+						{#if ussdBusy}<span class="spinner"></span>{:else}<i class="bi bi-send"></i>{/if}
+						{$_('modem.ussd_send')}
+					</button>
+				</div>
+				<p class="help">{$_('modem.ussd_help')}</p>
+			</div>
+			{#if ussdResp}
+				<div class="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-sm whitespace-pre-wrap">
+					{ussdResp}
+				</div>
+			{/if}
+		</section>
+
+		<!-- SMS -->
+		<section class="surface p-5 mb-5 space-y-3">
+			<div class="flex items-center justify-between">
+				<span class="label !mb-0">{$_('modem.sms')}</span>
+				<button class="text-xs text-brand-600 dark:text-brand-400 hover:underline" type="button" onclick={loadSMS}>
+					<i class="bi bi-arrow-clockwise"></i>{$_('modem.sms_refresh')}
+				</button>
+			</div>
+
+			{#if sms.length === 0}
+				<p class="text-sm text-zinc-500 dark:text-zinc-400">{$_('modem.sms_empty')}</p>
+			{:else}
+				<ul class="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-72 overflow-y-auto">
+					{#each sms as m (m.id)}
+						<li class="py-2 flex items-start gap-3">
+							<i class="bi {m.sent ? 'bi-arrow-up-right text-sky-500' : 'bi-arrow-down-left text-emerald-500'} mt-0.5"></i>
+							<div class="flex-1 min-w-0">
+								<div class="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+									{m.number}{#if m.timestamp} · {new Date(m.timestamp).toLocaleString()}{/if}
+								</div>
+								<div class="text-sm break-words">{m.text}</div>
+							</div>
+							<button
+								class="text-zinc-400 hover:text-red-500 shrink-0"
+								type="button"
+								title={$_('modem.sms_delete')}
+								onclick={() => deleteSMS(m.id)}
+							>
+								<i class="bi bi-trash"></i>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+
+			<div class="flex flex-col sm:flex-row gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+				<input class="input font-mono sm:w-44" bind:value={smsNumber} placeholder="+7…" />
+				<input class="input flex-1" bind:value={smsText} placeholder={$_('modem.sms_text_ph')} />
+				<button class="btn-ghost shrink-0" type="button" disabled={smsBusy} onclick={sendSMS}>
+					{#if smsBusy}<span class="spinner"></span>{:else}<i class="bi bi-send"></i>{/if}
+					{$_('modem.sms_send')}
+				</button>
+			</div>
+		</section>
+	{/if}
+
+	{#if ctlError}
+		<div class="flex items-start gap-2 p-3 mb-4 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+			<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i><span>{ctlError}</span>
+		</div>
+	{/if}
 
 	{#if asWAN}
 		<div class="surface border-amber-300 dark:border-amber-500/30 p-3 mb-4 text-xs flex items-start gap-2">
