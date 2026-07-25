@@ -27,13 +27,22 @@ func (s *Server) MountZapret(r chi.Router) {
 
 // zapretEgressIface mirrors the helper in cmd/knotd: the interface
 // internet-bound traffic leaves on, which the nft hook (and the
-// auto-tune probes) need. Empty disables (setup role / no WAN).
-func zapretEgressIface(cfg config.Config) string {
+// auto-tune probes) need. Empty disables (setup role / no WAN). In modem
+// WAN mode the config interface is empty (the wwanN device is discovered
+// at connect time), so it's resolved live from the backend.
+func (s *Server) zapretEgressIface(cfg config.Config) string {
 	switch cfg.Role {
 	case config.RoleWiFiRouter:
-		if cfg.Network.WAN != nil {
-			return cfg.Network.WAN.Interface
+		if cfg.Network.WAN == nil {
+			return ""
 		}
+		if cfg.Network.WAN.Mode == "modem" {
+			if p, ok := s.backend.(interface{ LiveModemIface() string }); ok {
+				return p.LiveModemIface()
+			}
+			return ""
+		}
+		return cfg.Network.WAN.Interface
 	case config.RoleWiFiExtender:
 		return "wlan0"
 	}
@@ -103,7 +112,7 @@ func (s *Server) handleAutoTuneZapret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.Snapshot()
-	wan := zapretEgressIface(cfg)
+	wan := s.zapretEgressIface(cfg)
 	if wan == "" {
 		writeError(w, http.StatusUnprocessableEntity, "no_wan",
 			"auto-tune needs a WAN interface — switch to router mode first")

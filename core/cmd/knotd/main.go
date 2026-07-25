@@ -188,12 +188,28 @@ func dnsListenForRole(cfg config.Config, devMode bool) string {
 // on, which the zapret nft hook matches as oifname. Router → the WAN
 // dongle; extender → the wlan0 STA uplink. Empty (setup role, or router
 // with no WAN yet) disables the hook.
-func zapretEgressIface(cfg config.Config) string {
+// liveWANIfaceProvider is satisfied by the Linux backend: in modem WAN
+// mode the config's WAN.Interface is empty (the wwanN device is
+// discovered at connect time), so subsystems that key off the egress
+// interface ask the backend for the live one.
+type liveWANIfaceProvider interface {
+	LiveModemIface() string
+}
+
+func zapretEgressIface(cfg config.Config, backend network.Backend) string {
 	switch cfg.Role {
 	case config.RoleWiFiRouter:
-		if cfg.Network.WAN != nil {
-			return cfg.Network.WAN.Interface
+		if cfg.Network.WAN == nil {
+			return ""
 		}
+		if cfg.Network.WAN.Mode == "modem" {
+			// Discovered at connect time — resolve the live wwanN.
+			if p, ok := backend.(liveWANIfaceProvider); ok {
+				return p.LiveModemIface()
+			}
+			return ""
+		}
+		return cfg.Network.WAN.Interface
 	case config.RoleWiFiExtender:
 		return "wlan0"
 	}
@@ -1312,7 +1328,7 @@ func main() {
 		// Zapret (nfqws DPI-bypass). Reconciled on every config-applied
 		// so a toggle/strategy change takes effect immediately. Egress
 		// interface is the WAN in router mode, the uplink in extender.
-		zwan := zapretEgressIface(applied)
+		zwan := zapretEgressIface(applied, backend)
 		zs := zapret.Settings{WANInterface: zwan}
 		if applied.Network.Zapret != nil {
 			zs.Enabled = applied.Network.Zapret.Enabled

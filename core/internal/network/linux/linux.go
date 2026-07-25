@@ -76,6 +76,15 @@ func (b *LinuxBackend) lastModemIface() string {
 	return b.modemIface
 }
 
+// LiveModemIface exposes the modem's live data interface to callers
+// outside this package (e.g. main.go wiring the Zapret egress). Returns
+// "" when no modem is connected. In modem WAN mode the config's
+// WAN.Interface is empty — this is how downstream subsystems learn the
+// discovered wwanN name.
+func (b *LinuxBackend) LiveModemIface() string {
+	return b.lastModemIface()
+}
+
 // setModemErr records (or clears, with "") the last cellular connect
 // failure reason for ModemStatus to surface.
 func (b *LinuxBackend) setModemErr(s string) {

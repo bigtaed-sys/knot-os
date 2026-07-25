@@ -64,3 +64,6 @@ func (b *LinuxBackend) UpdateBlockedMACs(_ []string) error {
 // SetGuestProvider is a no-op on non-Linux platforms — the apply
 // paths that consume it are linux-only anyway.
 func (b *LinuxBackend) SetGuestProvider(_ GuestSessionProvider) {}
+
+// LiveModemIface has no meaning off Linux (no ModemManager).
+func (b *LinuxBackend) LiveModemIface() string { return "" }

@@ -4,6 +4,13 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.1-1] — 2026-07-25
+
+### Fixed
+
+- **Zapret now runs on a cellular-modem WAN.** In modem mode the config's WAN interface is empty (the `wwanN` device is discovered at connect time), so Zapret saw "no WAN", stopped `nfqws`, and never even reached the binary download — the UI sat on "will be downloaded / not running" forever. Both egress-interface resolvers now ask the backend for the live modem interface, so enabling Zapret on a modem downloads `nfqws` and starts as expected. Auto-tune (which had the same blind spot, failing with "no WAN") is fixed too.
+- **Refreshing strategies no longer shrinks the list.** Flowseal changing a `.bat`'s format used to overwrite a working strategy with an unparseable one, which `LoadStrategies` then dropped — so a refresh could leave *fewer* strategies than shipped. Now the loader prefers a disk copy only when it actually converts and otherwise falls back to the embedded seed (so a bad refresh self-heals on the next load), and the refresh itself skips a renamed/removed upstream file (and validates a download before overwriting) instead of aborting the whole run on the first error.
+
 ## [2026.07.1] — 2026-07-25
 
 ### Cellular modem WAN — Phase 2 (keepalive + resilience)

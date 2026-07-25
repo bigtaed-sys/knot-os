@@ -139,17 +139,32 @@ func RefreshStrategies(ctx context.Context, base string) (int, error) {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	updated := 0
+	var errs []string
 	for id, fname := range strategyTargets {
 		url := ListsRefreshBase + "/" + urlEscapePath(fname)
 		data, err := fetch(cctx, url, 256<<10)
 		if err != nil {
-			return updated, fmt.Errorf("refresh strategy %s: %w", id, err)
+			// Upstream renamed/removed this one — keep the seed/existing
+			// copy and carry on rather than aborting the whole refresh.
+			errs = append(errs, fmt.Sprintf("%s: %v", id, err))
+			continue
+		}
+		// Only overwrite when the download actually converts. A format
+		// change upstream must never clobber a working strategy with an
+		// unparseable file (LoadStrategies would then have to drop it).
+		if s, cerr := ConvertBat(string(data)); cerr != nil || len(s.Args) == 0 {
+			errs = append(errs, fmt.Sprintf("%s: unparseable after download", id))
+			continue
 		}
 		dst := filepath.Join(dir, id+".bat")
 		if err := writeAtomic(dst, data, 0o644); err != nil {
 			return updated, err
 		}
 		updated++
+	}
+	// Only a hard error when nothing at all could be refreshed.
+	if updated == 0 && len(errs) > 0 {
+		return 0, fmt.Errorf("no strategies refreshed (%s)", strings.Join(errs, "; "))
 	}
 	return updated, nil
 }
@@ -175,15 +190,21 @@ func RefreshLists(ctx context.Context, base string) (int, error) {
 	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	updated := 0
+	var errs []string
 	for _, t := range refreshTargets {
 		data, err := fetch(cctx, ListsRefreshBase+"/"+t.urlPath, 4<<20)
 		if err != nil {
-			return updated, fmt.Errorf("refresh %s: %w", t.urlPath, err)
+			// Skip a renamed/removed list rather than aborting the rest.
+			errs = append(errs, fmt.Sprintf("%s: %v", t.urlPath, err))
+			continue
 		}
 		if err := writeAtomic(t.dstRel(base), data, 0o644); err != nil {
 			return updated, err
 		}
 		updated++
+	}
+	if updated == 0 && len(errs) > 0 {
+		return 0, fmt.Errorf("no lists refreshed (%s)", strings.Join(errs, "; "))
 	}
 	return updated, nil
 }

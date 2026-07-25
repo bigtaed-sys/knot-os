@@ -59,24 +59,26 @@ var stratOrder = []string{
 	"general", "alt", "alt2", "alt3", "alt4", "alt5", "alt6", "fake-tls-auto", "simple-fake",
 }
 
-// LoadStrategies reads the strategy catalogue: disk copies under
-// <base>/strategies override the embedded seed. Each .bat is converted
-// from winws to nfqws. Unparseable files are skipped.
+// LoadStrategies reads the strategy catalogue. A disk copy under
+// <base>/strategies is preferred over the embedded seed — but only when
+// it actually converts: if a refresh pulled an upstream .bat whose format
+// we can't parse, we fall back to the working seed for that ID instead of
+// dropping the strategy entirely. Each .bat is converted from winws to
+// nfqws; IDs unparseable in both seed and disk are skipped.
 func LoadStrategies(base string) []Strategy {
-	files := map[string]string{} // id -> .bat content
+	seed := map[string]string{}  // id -> embedded seed content
+	disk := map[string]string{}  // id -> on-disk (refreshed) content
 
-	// Embedded seed first.
 	if entries, err := fs.ReadDir(seedStrategies, "assets/strategies"); err == nil {
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".bat") {
 				continue
 			}
 			if b, err := seedStrategies.ReadFile("assets/strategies/" + e.Name()); err == nil {
-				files[strings.TrimSuffix(e.Name(), ".bat")] = string(b)
+				seed[strings.TrimSuffix(e.Name(), ".bat")] = string(b)
 			}
 		}
 	}
-	// Disk copies override / extend.
 	diskDir := filepath.Join(base, "strategies")
 	if entries, err := os.ReadDir(diskDir); err == nil {
 		for _, e := range entries {
@@ -84,15 +86,44 @@ func LoadStrategies(base string) []Strategy {
 				continue
 			}
 			if b, err := os.ReadFile(filepath.Join(diskDir, e.Name())); err == nil {
-				files[strings.TrimSuffix(e.Name(), ".bat")] = string(b)
+				disk[strings.TrimSuffix(e.Name(), ".bat")] = string(b)
 			}
 		}
 	}
 
-	var out []Strategy
-	for id, content := range files {
+	// Every ID we've seen from either source.
+	ids := map[string]struct{}{}
+	for id := range seed {
+		ids[id] = struct{}{}
+	}
+	for id := range disk {
+		ids[id] = struct{}{}
+	}
+
+	// convert returns the parsed strategy for content, ok=false when it
+	// doesn't yield usable args.
+	convert := func(content string) (Strategy, bool) {
 		s, err := ConvertBat(content)
 		if err != nil || len(s.Args) == 0 {
+			return Strategy{}, false
+		}
+		return s, true
+	}
+
+	var out []Strategy
+	for id := range ids {
+		// Prefer the refreshed disk copy, but fall back to the seed when
+		// the disk copy fails to convert (upstream format change).
+		s, ok := Strategy{}, false
+		if c, has := disk[id]; has {
+			s, ok = convert(c)
+		}
+		if !ok {
+			if c, has := seed[id]; has {
+				s, ok = convert(c)
+			}
+		}
+		if !ok {
 			continue
 		}
 		s.ID = id
