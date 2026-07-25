@@ -32,13 +32,8 @@ func (s *Server) tgSettings(cfg config.Config) tgproxy.Settings {
 	if t == nil {
 		t = &config.TGProxy{}
 	}
-	mode := tgproxy.Mode(t.Mode)
-	if mode == "" {
-		mode = tgproxy.ModeMTProto
-	}
 	return tgproxy.Settings{
 		Enabled: t.Enabled,
-		Mode:    mode,
 		Port:    t.Port,
 		Secret:  t.Secret,
 		LinkIP:  lanGatewayIP(cfg),
@@ -59,9 +54,8 @@ func (s *Server) handleGetTGProxy(w http.ResponseWriter, _ *http.Request) {
 		port = tgproxy.DefaultPort
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":  set.Enabled,
-		"mode":     string(set.Mode),
-		"port":     port,
+		"enabled":    set.Enabled,
+		"port":       port,
 		"has_secret": set.Secret != "",
 		"lan_ip":   set.LinkIP,
 		"tg_link":  tgproxy.TGLink(set),
@@ -76,7 +70,6 @@ func (s *Server) handleGetTGProxy(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handlePutTGProxy(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled bool    `json:"enabled"`
-		Mode    string  `json:"mode"`
 		Port    int     `json:"port"`
 		Secret  *string `json:"secret"` // nil = keep
 	}
@@ -90,13 +83,13 @@ func (s *Server) handlePutTGProxy(w http.ResponseWriter, r *http.Request) {
 		t = *incoming.Network.TGProxy
 	}
 	t.Enabled = body.Enabled
-	t.Mode = body.Mode
+	t.Mode = "mtproto"
 	t.Port = body.Port
 	if body.Secret != nil {
 		t.Secret = *body.Secret
 	}
-	// MTProto mode needs a secret — generate one if enabling without it.
-	if t.Enabled && tgproxy.Mode(t.Mode) != tgproxy.ModeSOCKS5 && !tgproxy.ValidSecret(t.Secret) {
+	// MTProto always needs a secret — generate one if enabling without it.
+	if t.Enabled && !tgproxy.ValidSecret(t.Secret) {
 		sec, err := tgproxy.GenerateSecret()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "secret_failed", err.Error())

@@ -42,39 +42,24 @@ const (
 	DefaultPort = 8443
 )
 
-// Mode is the proxy protocol Telegram clients connect with.
-type Mode string
-
-const (
-	// ModeMTProto exposes an MTProto proxy (the tg://proxy link kind);
-	// this is what Telegram mobile/desktop "Proxy" settings expect.
-	ModeMTProto Mode = "mtproto"
-	// ModeSOCKS5 exposes a SOCKS5 proxy (also usable to route the bot).
-	ModeSOCKS5 Mode = "socks5"
-)
-
-// Settings is the live proxy configuration the Manager acts on.
+// Settings is the live proxy configuration the Manager acts on. The proxy
+// always runs in MTProto mode (the tg://proxy link kind Telegram apps
+// expect) — SOCKS5 was dropped as unused.
 type Settings struct {
 	// Enabled turns the proxy process on.
 	Enabled bool
-	// Mode is "mtproto" (default) or "socks5".
-	Mode Mode
 	// Port is the LAN listen port.
 	Port int
-	// Secret is the 32-hex MTProto secret (mtproto mode). Empty → the
-	// Manager generates one on first enable.
+	// Secret is the 32-hex MTProto secret. Empty → the Manager generates
+	// one on first enable.
 	Secret string
 	// LinkIP is the address to embed in the tg:// link — the router's
 	// LAN gateway IP, or a public IP for remote use. Empty omits it.
 	LinkIP string
 }
 
-// BuildArgs renders the tg-ws-proxy CLI arguments for s.
+// BuildArgs renders the tg-ws-proxy CLI arguments for s (MTProto mode).
 func BuildArgs(s Settings) []string {
-	mode := s.Mode
-	if mode == "" {
-		mode = ModeMTProto
-	}
 	port := s.Port
 	if port == 0 {
 		port = DefaultPort
@@ -82,7 +67,7 @@ func BuildArgs(s Settings) []string {
 	args := []string{
 		"--host", "0.0.0.0",
 		"--port", strconv.Itoa(port),
-		"--mode", string(mode),
+		"--mode", "mtproto",
 		// Route via Cloudflare using the binary's built-in domains
 		// (--cf-proxy with no --cf-domain falls back to the embedded
 		// defaults). This is what makes it work out of the box where the
@@ -90,20 +75,18 @@ func BuildArgs(s Settings) []string {
 		// skips the blocked direct attempt so clients don't hang.
 		"--cf-proxy",
 		"--cf-proxy-first",
+		"--secret", s.Secret,
 	}
-	if mode == ModeMTProto {
-		args = append(args, "--secret", s.Secret)
-		if s.LinkIP != "" {
-			args = append(args, "--link-ip", s.LinkIP)
-		}
+	if s.LinkIP != "" {
+		args = append(args, "--link-ip", s.LinkIP)
 	}
 	return args
 }
 
 // TGLink builds the tg://proxy link a Telegram user taps to add the
-// router as an MTProto proxy. Empty for socks5 mode or when incomplete.
+// router as an MTProto proxy. Empty when incomplete.
 func TGLink(s Settings) string {
-	if s.Mode == ModeSOCKS5 || s.Secret == "" || s.LinkIP == "" {
+	if s.Secret == "" || s.LinkIP == "" {
 		return ""
 	}
 	port := s.Port

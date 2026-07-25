@@ -30,7 +30,6 @@
 	}
 	let tg = $state<TGProxy | null>(null);
 	let tgEnabled = $state(false);
-	let tgMode = $state('mtproto');
 	let tgPort = $state(8443);
 	let tgSecret = $state('');
 	let tgSecretTouched = $state(false);
@@ -43,7 +42,6 @@
 			tg = r;
 			if (initial) {
 				tgEnabled = r.enabled;
-				tgMode = r.mode || 'mtproto';
 				tgPort = r.port || 8443;
 			}
 		} catch {
@@ -65,7 +63,7 @@
 		tgSaving = true;
 		error = null;
 		try {
-			const body: Record<string, unknown> = { enabled: tgEnabled, mode: tgMode, port: tgPort };
+			const body: Record<string, unknown> = { enabled: tgEnabled, mode: 'mtproto', port: tgPort };
 			if (tgSecretTouched && tgSecret.trim()) body.secret = tgSecret.trim();
 			await apiPut('/tgproxy', body, { timeoutMs: 60000 });
 			tgSecret = '';
@@ -501,45 +499,27 @@
 
 		<!-- Settings -->
 		<section class="surface p-5 mb-5 space-y-4" class:opacity-60={!tgEnabled}>
-			<div>
-				<span class="label">{$_('zapret.tg_mode')}</span>
-				<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
-					{#each [{ id: 'mtproto', label: $_('zapret.tg_mode_mtproto') }, { id: 'socks5', label: $_('zapret.tg_mode_socks5') }] as m (m.id)}
-						<button
-							type="button"
-							disabled={!tgEnabled}
-							onclick={() => (tgMode = m.id)}
-							class="p-3 rounded-md border text-sm text-left
-								{tgMode === m.id ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10' : 'border-zinc-200 dark:border-zinc-700'}"
-						>
-							{m.label}
-						</button>
-					{/each}
-				</div>
-			</div>
 			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 				<div>
 					<label class="label" for="tgport">{$_('zapret.tg_port')}</label>
 					<input id="tgport" class="input font-mono" type="number" min="1" max="65535" bind:value={tgPort} disabled={!tgEnabled} />
 				</div>
-				{#if tgMode === 'mtproto'}
-					<div>
-						<label class="label" for="tgsecret">{$_('zapret.tg_secret')}</label>
-						<div class="flex gap-2">
-							<input
-								id="tgsecret"
-								class="input font-mono flex-1"
-								bind:value={tgSecret}
-								oninput={() => (tgSecretTouched = true)}
-								placeholder={tg?.has_secret ? '••••••••' : ''}
-								disabled={!tgEnabled}
-							/>
-							<button class="btn-ghost shrink-0" type="button" onclick={genSecret} disabled={!tgEnabled}>
-								{$_('zapret.tg_secret_gen')}
-							</button>
-						</div>
+				<div>
+					<label class="label" for="tgsecret">{$_('zapret.tg_secret')}</label>
+					<div class="flex gap-2">
+						<input
+							id="tgsecret"
+							class="input font-mono flex-1"
+							bind:value={tgSecret}
+							oninput={() => (tgSecretTouched = true)}
+							placeholder={tg?.has_secret ? '••••••••' : ''}
+							disabled={!tgEnabled}
+						/>
+						<button class="btn-ghost shrink-0" type="button" onclick={genSecret} disabled={!tgEnabled}>
+							{$_('zapret.tg_secret_gen')}
+						</button>
 					</div>
-				{/if}
+				</div>
 			</div>
 			<div class="flex items-center gap-2">
 				<button class="btn-primary" type="button" disabled={tgSaving} onclick={saveTG}>

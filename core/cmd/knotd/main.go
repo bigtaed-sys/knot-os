@@ -1449,7 +1449,6 @@ func main() {
 		if applied.Network.TGProxy != nil {
 			t := applied.Network.TGProxy
 			ts.Enabled = t.Enabled
-			ts.Mode = tgproxy.Mode(t.Mode)
 			ts.Port = t.Port
 			ts.Secret = t.Secret
 		}

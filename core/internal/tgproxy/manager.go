@@ -73,7 +73,7 @@ func (m *Manager) Apply(ctx context.Context, s Settings) error {
 	}
 
 	args := BuildArgs(s)
-	key := string(s.Mode) + "\x00" + strings.Join(args, "\x00")
+	key := strings.Join(args, "\x00")
 	if m.runner == nil {
 		m.lastKey = key
 		return nil
