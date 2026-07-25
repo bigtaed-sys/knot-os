@@ -425,7 +425,8 @@ if [[ ! -f "$BASE_IMG" ]] || [[ ! -s "$BASE_IMG" ]]; then
             libqmi-utils \
             libmbim-utils \
             usb-modeswitch \
-            usb-modeswitch-data
+            usb-modeswitch-data \
+            mobile-broadband-provider-info
         apt-get clean
         rm -rf /var/lib/apt/lists/*
     "
