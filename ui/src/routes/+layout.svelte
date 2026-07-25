@@ -96,7 +96,12 @@
 	{@render children()}
 {:else}
 	<div class="min-h-screen flex">
-		<Sidebar {plugins} version={status?.version ?? ''} bind:open={sidebarOpen} />
+		<Sidebar
+			{plugins}
+			version={status?.version ?? ''}
+			modemActive={status?.network?.wan?.mode === 'modem'}
+			bind:open={sidebarOpen}
+		/>
 		<div class="flex-1 flex flex-col min-w-0">
 			<Topbar onMenuClick={() => (sidebarOpen = true)} />
 			<main class="flex-1 p-4 lg:p-8">

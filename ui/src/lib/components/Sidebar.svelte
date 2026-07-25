@@ -13,28 +13,34 @@
 	let {
 		plugins = [],
 		version = '',
+		modemActive = false,
 		open = $bindable(false)
 	}: {
 		plugins?: Plugin[];
 		version?: string;
+		modemActive?: boolean;
 		open?: boolean;
 	} = $props();
 
-	const coreItems: NavItem[] = [
-		{ path: '/', icon: 'bi-speedometer2', label: 'nav.dashboard' },
-		{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
-		{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
-		{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
-		{ path: '/routing', icon: 'bi-globe-americas', label: 'nav.routing' },
-		{ path: '/vpn', icon: 'bi-key', label: 'nav.vpn' },
-		{ path: '/portforwards', icon: 'bi-box-arrow-in-right', label: 'nav.portforward' },
-		{ path: '/zapret', icon: 'bi-magic', label: 'nav.zapret' },
-		{ path: '/modem', icon: 'bi-sim', label: 'nav.modem' },
-		{ path: '/messages', icon: 'bi-chat-dots', label: 'nav.messages' },
-		{ path: '/guests', icon: 'bi-people', label: 'nav.guests' },
-		{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
-		{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
-	];
+	// Messages (SMS) only makes sense with a cellular modem as the WAN;
+	// hide it otherwise.
+	const coreItems = $derived(
+		[
+			{ path: '/', icon: 'bi-speedometer2', label: 'nav.dashboard' },
+			{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
+			{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
+			{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
+			{ path: '/routing', icon: 'bi-globe-americas', label: 'nav.routing' },
+			{ path: '/vpn', icon: 'bi-key', label: 'nav.vpn' },
+			{ path: '/portforwards', icon: 'bi-box-arrow-in-right', label: 'nav.portforward' },
+			{ path: '/zapret', icon: 'bi-magic', label: 'nav.zapret' },
+			{ path: '/modem', icon: 'bi-sim', label: 'nav.modem' },
+			{ path: '/messages', icon: 'bi-chat-dots', label: 'nav.messages', modemOnly: true },
+			{ path: '/guests', icon: 'bi-people', label: 'nav.guests' },
+			{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
+			{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
+		].filter((it) => !('modemOnly' in it && it.modemOnly) || modemActive)
+	);
 
 	function isActive(itemPath: string, currentPath: string): boolean {
 		if (itemPath === '/') return currentPath === '/';
