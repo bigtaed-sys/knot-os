@@ -78,6 +78,14 @@
 		@apply focus:ring-offset-zinc-900;
 	}
 
+	/* Subtle tactile press on all buttons (also upgrades their transition
+	   from colors-only to all properties so the scale animates too). */
+	.btn-primary,
+	.btn-ghost,
+	.btn-danger {
+		@apply transition duration-150 active:scale-[0.97];
+	}
+
 	/* Text input */
 	.input {
 		@apply block w-full px-3 py-2 rounded-lg

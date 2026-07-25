@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { _, isLoading, waitLocale } from 'svelte-i18n';
@@ -100,7 +101,11 @@
 			<Topbar onMenuClick={() => (sidebarOpen = true)} />
 			<main class="flex-1 p-4 lg:p-8">
 				<div class="max-w-5xl mx-auto w-full">
-					{@render children()}
+					{#key $page.url.pathname}
+						<div in:fade={{ duration: 120 }}>
+							{@render children()}
+						</div>
+					{/key}
 				</div>
 			</main>
 		</div>

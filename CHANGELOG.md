@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.5-1] — 2026-07-25
+
+### Changed
+
+- **Motion pass + tab polish.** Switching tabs and navigating between pages now fades smoothly, and buttons have a subtle press response. The in-page tab strip no longer shows a stray scrollbar or nudges the page a pixel in either direction (hidden scrollbar, no negative margins). Dropped the "experimental" banner from the Modem page.
+
 ## [2026.07.5] — 2026-07-25
 
 ### Changed

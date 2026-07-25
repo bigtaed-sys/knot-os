@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, apiPost, ApiError } from '$lib/api';
@@ -221,11 +222,6 @@
 {#if loading}
 	<div class="flex items-center justify-center py-16 text-zinc-400"><div class="spinner"></div></div>
 {:else}
-	<div class="surface border-amber-300 dark:border-amber-500/30 p-3 mb-5 text-xs flex items-start gap-2">
-		<i class="bi bi-cone-striped text-amber-500 mt-0.5"></i>
-		<span>{$_('modem.experimental')}</span>
-	</div>
-
 	{#if !routerMode}
 		<div class="surface border-amber-300 dark:border-amber-500/30 p-4 mb-5 text-sm flex items-start gap-3">
 			<i class="bi bi-info-circle text-amber-500 text-lg mt-0.5"></i>
@@ -235,6 +231,8 @@
 
 	<Tabs tabs={tabList} bind:active={activeTab} />
 
+	{#key activeTab}
+	<div in:fade={{ duration: 140 }}>
 	{#if activeTab === 'status'}
 	<!-- Live status -->
 	<section class="surface p-5 mb-5">
@@ -536,6 +534,8 @@
 		</section>
 	{/if}
 	{/if}
+	</div>
+	{/key}
 
 	{#if ctlError}
 		<div class="flex items-start gap-2 p-3 mb-4 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
