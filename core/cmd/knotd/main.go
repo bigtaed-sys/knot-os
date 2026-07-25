@@ -1270,6 +1270,66 @@ func main() {
 				}
 			}
 		}()
+
+		// Modem alerts: fire once when cellular usage crosses the cap,
+		// and when the modem drops into ModemManager's "failed" state
+		// (usually a SIM problem). Both are edge-triggered so a single
+		// crossing sends one message, not one per tick.
+		go func() {
+			t := time.NewTicker(60 * time.Second)
+			defer t.Stop()
+			type modemStatuser interface {
+				ModemStatus(context.Context) (network.ModemStatus, error)
+			}
+			ms, _ := backend.(modemStatuser)
+			var capAlerted, lastFailed bool
+			var lastCycle time.Time
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					cfg := apiSrv.Snapshot()
+					wan := cfg.Network.WAN
+					if wan == nil || wan.Mode != "modem" || wan.Modem == nil {
+						continue
+					}
+					// Data cap (reset the alert flag each billing cycle).
+					snap := mmTracker.Snapshot()
+					if !snap.CycleStart.Equal(lastCycle) {
+						lastCycle = snap.CycleStart
+						capAlerted = false
+					}
+					if wan.Modem.DataLimitMB > 0 {
+						limit := uint64(wan.Modem.DataLimitMB) * 1024 * 1024
+						if snap.TotalBytes >= limit && !capAlerted {
+							capAlerted = true
+							eventBus.Publish(ctx, events.Event{
+								Kind:    events.KindDataCap,
+								Payload: events.DataCap{UsedBytes: snap.TotalBytes, LimitBytes: limit},
+							})
+						}
+					}
+					// SIM / failed state.
+					if ms != nil {
+						if st, err := ms.ModemStatus(ctx); err == nil {
+							failed := st.State == "failed"
+							if failed && !lastFailed {
+								reason := st.LastError
+								if reason == "" {
+									reason = "modem in failed state"
+								}
+								eventBus.Publish(ctx, events.Event{
+									Kind:    events.KindModemFailed,
+									Payload: events.ModemFailed{Reason: reason},
+								})
+							}
+							lastFailed = failed
+						}
+					}
+				}
+			}
+		}()
 	}
 
 	srvOpts := httpserver.Options{

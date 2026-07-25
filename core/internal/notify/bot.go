@@ -731,8 +731,36 @@ func (b *Bot) formatEvent(ev events.Event, lang string) string {
 			return ""
 		}
 		return b.tr.T(lang, "notif_update_available", s.CurrentVersion, s.LatestVersion)
+	case events.KindDataCap:
+		s, ok := ev.Payload.(events.DataCap)
+		if !ok {
+			return ""
+		}
+		return b.tr.T(lang, "notif_data_cap", humanBytes(s.UsedBytes), humanBytes(s.LimitBytes))
+	case events.KindModemFailed:
+		s, ok := ev.Payload.(events.ModemFailed)
+		if !ok {
+			return ""
+		}
+		return b.tr.T(lang, "notif_modem_failed", s.Reason)
 	}
 	return ""
+}
+
+// humanBytes renders a byte count as "1.2 GB" etc. for notification text.
+func humanBytes(n uint64) string {
+	const u = 1024.0
+	f := float64(n)
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	i := 0
+	for f >= u && i < len(units)-1 {
+		f /= u
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d %s", n, units[i])
+	}
+	return fmt.Sprintf("%.1f %s", f, units[i])
 }
 
 // --- low-level send / edit ------------------------------------------------

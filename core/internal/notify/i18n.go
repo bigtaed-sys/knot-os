@@ -152,6 +152,8 @@ var phrasesRU = map[string]string{
 	"notif_guest_revoked":      "👥 Гостевая сеть `%s` закрыта.",
 	"notif_guest_expired":      "👥 Гостевая сеть `%s` сама истекла по таймеру 🕓",
 	"notif_update_available":   "✨ *Доступно обновление KnotOS*\n\nТекущая версия: %s\nНовая: *%s*\n\nЗайдите в админку → *Система* → *Обновления*, чтобы установить. Это займёт пару минут.",
+	"notif_data_cap":           "📵 *Достигнут лимит трафика*\n\nИзрасходовано %s из %s за расчётный период.\n\nПри необходимости измените лимит: админка → *Модем* → *Данные*.",
+	"notif_modem_failed":       "⚠️ *Проблема с модемом*\n\n%s\n\nОбычно это SIM: проверьте, что карта вставлена и держится в слоте. Роутер попробует восстановить связь автоматически.",
 	"notif_profile_changed":    "🛡 Профиль *%s* присвоен устройству *%s* (было: %s).",
 }
 
@@ -233,5 +235,7 @@ var phrasesEN = map[string]string{
 	"notif_guest_revoked":      "👥 Guest network `%s` closed.",
 	"notif_guest_expired":      "👥 Guest network `%s` expired on its own 🕓",
 	"notif_update_available":   "✨ *KnotOS update is out*\n\nCurrent: %s\nNew: *%s*\n\nOpen the admin UI → *System* → *Updates* to install. Takes a couple of minutes.",
+	"notif_data_cap":           "📵 *Monthly data cap reached*\n\nUsed %s of %s this billing cycle.\n\nAdjust the cap if needed: admin UI → *Modem* → *Data*.",
+	"notif_modem_failed":       "⚠️ *Modem problem*\n\n%s\n\nUsually the SIM: check it's inserted and seated. The router will try to recover automatically.",
 	"notif_profile_changed":    "🛡 Profile *%s* assigned to *%s* (was: %s).",
 }

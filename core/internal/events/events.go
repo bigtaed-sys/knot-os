@@ -35,6 +35,12 @@ const (
 	// KindUpdateAvailable fires when the periodic update check
 	// finds a newer release. Payload: UpdateAvailable.
 	KindUpdateAvailable Kind = "update_available"
+	// KindDataCap fires once per billing cycle when cellular usage
+	// crosses the configured monthly cap. Payload: DataCap.
+	KindDataCap Kind = "data_cap"
+	// KindModemFailed fires when the cellular modem enters ModemManager's
+	// "failed" state (usually a SIM problem). Payload: ModemFailed.
+	KindModemFailed Kind = "modem_failed"
 )
 
 // Event is the supertype for everything on the bus. Concrete event
@@ -81,6 +87,17 @@ type GuestSession struct {
 type UpdateAvailable struct {
 	CurrentVersion string
 	LatestVersion  string
+}
+
+// DataCap is the payload for KindDataCap.
+type DataCap struct {
+	UsedBytes  uint64
+	LimitBytes uint64
+}
+
+// ModemFailed is the payload for KindModemFailed.
+type ModemFailed struct {
+	Reason string // ModemManager state-failed-reason / hint
 }
 
 // Handler receives events. Run inside a fresh goroutine per event,

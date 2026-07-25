@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.7] — 2026-07-25
+
+### Added
+
+- **Telegram push alerts for the modem.** When a Telegram chat is linked (System → Notifications), the bot now also pushes: **data cap reached** (once per billing cycle when cellular usage crosses the configured limit) and **modem failed / SIM problem** (when ModemManager drops the modem into a failed state). These join the existing WAN up/down, new-device, and update-available notifications — all edge-triggered, no per-tick spam.
+
 ## [2026.07.6] — 2026-07-25
 
 ### Changed
