@@ -131,7 +131,7 @@
 			<section class="surface p-5">
 				<header class="flex items-center justify-between mb-4">
 					<div class="flex items-center gap-2.5">
-						<i class="bi bi-ethernet text-brand-500 text-lg"></i>
+						<i class="bi {status.network.wan.mode === 'modem' ? 'bi-sim' : 'bi-ethernet'} text-brand-500 text-lg"></i>
 						<h2 class="font-semibold">{$_('dashboard.wan')}</h2>
 					</div>
 					{#if status.network.wan.up}
@@ -144,7 +144,9 @@
 					{/if}
 				</header>
 				<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
-					{$_('dashboard.wan_subtitle')}
+					{status.network.wan.mode === 'modem'
+						? $_('dashboard.wan_subtitle_modem')
+						: $_('dashboard.wan_subtitle')}
 				</p>
 				<dl class="space-y-2 text-sm">
 					<div class="flex items-center justify-between">
@@ -161,7 +163,11 @@
 						<div class="flex items-center justify-between">
 							<dt class="text-zinc-500 dark:text-zinc-400">{$_('dashboard.role')}</dt>
 							<dd class="font-medium">
-								{status.network.wan.mode === 'dhcp' ? $_('dashboard.wan_mode_dhcp') : status.network.wan.mode}
+								{status.network.wan.mode === 'dhcp'
+								? $_('dashboard.wan_mode_dhcp')
+								: status.network.wan.mode === 'modem'
+									? $_('dashboard.wan_mode_modem')
+									: status.network.wan.mode}
 							</dd>
 						</div>
 					{/if}

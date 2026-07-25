@@ -47,6 +47,48 @@ type LinuxBackend struct {
 	mu      sync.Mutex
 	current config.Config
 	hasCfg  bool
+
+	// modemErr holds the reason the last cellular connect failed, so
+	// ModemStatus can report it to the UI. Guarded by its own mutex
+	// (not b.mu): ModemStatus polls frequently and must never block on
+	// an in-flight Apply, and Apply must never block on a status read.
+	// modemWatchCancel stops the cellular keepalive loop; non-nil only
+	// while a modem is the WAN.
+	modemMu          sync.Mutex
+	modemErr         string
+	modemIface       string
+	modemWatchCancel context.CancelFunc
+}
+
+// setModemIface records the modem's live data interface (or "" when the
+// modem is down) so Status can report the cellular WAN — the config's
+// WAN.Interface is empty in modem mode (the iface is discovered).
+func (b *LinuxBackend) setModemIface(iface string) {
+	b.modemMu.Lock()
+	b.modemIface = iface
+	b.modemMu.Unlock()
+}
+
+// lastModemIface returns the modem's live data interface, or "".
+func (b *LinuxBackend) lastModemIface() string {
+	b.modemMu.Lock()
+	defer b.modemMu.Unlock()
+	return b.modemIface
+}
+
+// setModemErr records (or clears, with "") the last cellular connect
+// failure reason for ModemStatus to surface.
+func (b *LinuxBackend) setModemErr(s string) {
+	b.modemMu.Lock()
+	b.modemErr = s
+	b.modemMu.Unlock()
+}
+
+// lastModemErr returns the last recorded cellular connect failure.
+func (b *LinuxBackend) lastModemErr() string {
+	b.modemMu.Lock()
+	defer b.modemMu.Unlock()
+	return b.modemErr
 }
 
 // SetGuestProvider wires a registry into the backend. Pass nil to
@@ -130,6 +172,16 @@ func (b *LinuxBackend) Apply(ctx context.Context, cfg config.Config) error {
 	}
 	b.current = cfg
 	b.hasCfg = true
+
+	// Cellular keepalive: run the watchdog only while a modem is the
+	// WAN. It reconnects the modem after a drop and resets it out of the
+	// "failed" state (e.g. after a SIM hot-swap) so the router self-heals
+	// without a reboot. start/stop take modemMu, not b.mu — no deadlock.
+	if cfg.Role == config.RoleWiFiRouter && cfg.Network.WAN != nil && cfg.Network.WAN.Mode == "modem" {
+		b.startModemWatch()
+	} else {
+		b.stopModemWatch()
+	}
 	return nil
 }
 
@@ -159,22 +211,31 @@ func (b *LinuxBackend) Status(_ context.Context) (network.Status, error) {
 		}
 	}
 	if b.current.Network.WAN != nil {
-		w := &network.WANStatus{
-			Interface: b.current.Network.WAN.Interface,
-			Mode:      b.current.Network.WAN.Mode,
+		// In modem mode the WAN interface is discovered at connect time,
+		// not stored in the config — use the live modem iface the connect/
+		// watchdog path recorded. A raw-ip wwan device reports operstate
+		// "unknown" even when carrying traffic, so for modems we treat
+		// "has an IPv4 address" as the up signal instead of operstate.
+		iface := b.current.Network.WAN.Interface
+		modemMode := b.current.Network.WAN.Mode == "modem"
+		if modemMode {
+			iface = b.lastModemIface()
 		}
-		// Carrier state from /sys/class/net/<iface>/operstate. "up" or
-		// "lower_up" mean the link is alive; everything else (down,
-		// dormant, notpresent) is treated as no carrier. We don't fail
-		// the whole Status call on read errors — the dashboard tile
-		// just shows a "down" state, same as if there were no carrier.
-		if state, err := readOperstate(b.current.Network.WAN.Interface); err == nil {
-			w.Up = state == "up"
-		}
-		// Address: first IPv4 address bound to the interface, if any.
-		// Best-effort, not fatal.
-		if ip, err := readPrimaryIPv4(b.current.Network.WAN.Interface); err == nil {
+		w := &network.WANStatus{Interface: iface, Mode: b.current.Network.WAN.Mode}
+		if iface != "" {
+			// Address: first IPv4 address bound to the interface, if any.
+			ip, _ := readPrimaryIPv4(iface)
 			w.IP = ip
+			if modemMode {
+				w.Up = ip != ""
+			} else {
+				// Carrier state from /sys/class/net/<iface>/operstate. "up"
+				// means the link is alive; everything else (down, dormant,
+				// notpresent) is treated as no carrier.
+				if state, err := readOperstate(iface); err == nil {
+					w.Up = state == "up"
+				}
+			}
 		}
 		st.WAN = w
 	}
@@ -185,6 +246,7 @@ func (b *LinuxBackend) Status(_ context.Context) (network.Status, error) {
 
 // Close stops every supervised daemon. Intended for shutdown only.
 func (b *LinuxBackend) Close() {
+	b.stopModemWatch()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, p := range []*supervisedProc{b.hostapd, b.wpaSupp, b.dnsmasq} {

@@ -120,6 +120,9 @@ func (n Network) validateRouter() error {
 		// Cellular WAN: the data interface is discovered at apply time,
 		// so wan.interface may be empty. Nothing else is mandatory —
 		// APN/PIN are carrier-specific and often auto-provisioned.
+		if n.WAN.Modem != nil && (n.WAN.Modem.SIMSlot < 0 || n.WAN.Modem.SIMSlot > 8) {
+			return fmt.Errorf("wan.modem.sim_slot: %d outside 0..8", n.WAN.Modem.SIMSlot)
+		}
 	default:
 		return fmt.Errorf("wan.mode: must be \"dhcp\" or \"modem\" (got %q)", n.WAN.Mode)
 	}

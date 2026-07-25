@@ -467,6 +467,9 @@ export interface ModemStatus {
 	manufacturer?: string;
 	model?: string;
 	lock_required?: string;
+	last_error?: string;
+	sim_slots?: number;
+	primary_slot?: number;
 }
 
 export interface ModemResponse {
@@ -474,6 +477,7 @@ export interface ModemResponse {
 	apn: string;
 	username: string;
 	has_pin: boolean;
+	sim_slot: number;
 	status: ModemStatus;
 	router_mode: boolean;
 }

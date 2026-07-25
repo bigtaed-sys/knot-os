@@ -196,6 +196,11 @@ type Modem struct {
 	// Username / Password for the rare carriers that require PAP/CHAP.
 	Username string `yaml:"username,omitempty" json:"username,omitempty"`
 	Password string `yaml:"password,omitempty" json:"password,omitempty"`
+	// SIMSlot selects the active SIM slot (1-based) on modems that expose
+	// more than one. 0 leaves ModemManager's current primary slot as-is —
+	// the right default for the common single-SIM modem. Inert on modems
+	// that report a single slot.
+	SIMSlot int `yaml:"sim_slot,omitempty" json:"sim_slot,omitempty"`
 }
 
 // LAN is the IPv4 subnet config for the AP side.

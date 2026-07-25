@@ -171,8 +171,17 @@
 						<i class="bi bi-info-circle mr-1.5"></i>{$_('setup.conn.modem_none')}
 					</div>
 				{/if}
+				{#if modem.last_error && modem.state !== 'connected'}
+					<div class="p-3 rounded-md bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 text-sm text-red-700 dark:text-red-300">
+						<i class="bi bi-exclamation-circle mr-1.5"></i>{$_('modem.connect_failed')}
+						<span class="block mt-0.5 font-mono text-xs break-all">{modem.last_error}</span>
+					</div>
+				{/if}
 				<div>
-					<label class="text-sm font-medium text-zinc-700 dark:text-zinc-300" for="setup-apn">{$_('modem.apn')}</label>
+					<label class="text-sm font-medium text-zinc-700 dark:text-zinc-300" for="setup-apn">
+						{$_('modem.apn')}
+						<span class="font-normal text-zinc-400 dark:text-zinc-500">({$_('modem.optional')})</span>
+					</label>
 					<input id="setup-apn" class="input mt-1 font-mono" bind:value={wizard.wanApn} placeholder="internet" />
 					<p class="text-xs text-zinc-500 mt-1">{$_('modem.apn_help')}</p>
 				</div>

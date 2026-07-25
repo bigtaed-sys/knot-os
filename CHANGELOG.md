@@ -4,6 +4,20 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.1] — 2026-07-25
+
+### Cellular modem WAN — Phase 2 (keepalive + resilience)
+
+Validated on real hardware (Quectel EC25-EC) and hardened for day-to-day use as the primary WAN.
+
+- **Keepalive watchdog.** A cellular WAN used to connect once, at apply, and never recover: a modem that dropped out (USB autosuspend, network re-registration, a SIM hot-swap) stayed down until a reboot. A background watchdog now runs while a modem is the WAN and, every 30s, **reconnects** a dropped modem and **resets** one stuck in ModemManager's `failed` state (rate-limited) — so the router self-heals, including after reinserting the SIM, without a reboot. Recovery refreshes NAT for the live interface but never restarts hostapd/dnsmasq, so Wi-Fi clients aren't bounced.
+- **USB autosuspend disabled for the modem.** The most common cause of "internet works for a while, then the modem goes `disabled`": Linux suspends the idle USB modem and drops its control port. knotd now pins the modem's whole USB device chain to `on` at connect time.
+- **Real failure reasons in the UI.** A failed connect used to surface a bare "failed". The modem's own diagnosis (`state-failed-reason`, e.g. `sim-missing`) now flows to the Modem page and the wizard — with an actionable hint (reseat the SIM, etc.).
+- **SIM-slot switching** for modems that expose more than one slot: a slot selector appears on the Modem page (gated on ModemManager reporting multiple slots) and switches the active SIM via `--set-primary-sim-slot`. Inert on single-slot modems (e.g. EC25).
+- **APN is now truly optional.** The field is marked optional, and the image bundles `mobile-broadband-provider-info` so ModemManager can auto-provision the APN from the SIM's carrier when the field is left blank.
+- **Dashboard shows the modem WAN correctly.** In modem mode the WAN card no longer reads "down / waiting for Ethernet" — status now reflects the live modem interface (up when it has an IP), with modem-aware copy and a SIM icon.
+- Wizard/role copy is no longer Ethernet-only ("wired **or** cellular internet in, Wi-Fi out"), and the modem-page wording was made neutral and professional.
+
 ## [2026.06.16-1] — 2026-06-06
 
 ### Added

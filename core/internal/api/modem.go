@@ -47,6 +47,7 @@ func (s *Server) handleGetModem(w http.ResponseWriter, r *http.Request) {
 		"apn":      m.APN,
 		"username": m.Username,
 		"has_pin":  m.PIN != "",
+		"sim_slot": m.SIMSlot,
 		"status":   status,
 		// router_mode tells the UI a modem can only be the WAN in
 		// full-router mode (the extender uses a Wi-Fi uplink).
@@ -60,7 +61,8 @@ func (s *Server) handlePutModem(w http.ResponseWriter, r *http.Request) {
 		APN      string  `json:"apn"`
 		Username string  `json:"username"`
 		Password string  `json:"password"`
-		PIN      *string `json:"pin"` // nil = leave unchanged; "" = clear
+		PIN      *string `json:"pin"`      // nil = leave unchanged; "" = clear
+		SIMSlot  *int    `json:"sim_slot"` // nil = leave unchanged
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
@@ -82,6 +84,9 @@ func (s *Server) handlePutModem(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.PIN != nil {
 		m.PIN = *body.PIN
+	}
+	if body.SIMSlot != nil {
+		m.SIMSlot = *body.SIMSlot
 	}
 	incoming.Network.WAN.Modem = &m
 	if body.AsWAN {

@@ -145,9 +145,17 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	if modemMode {
 		iface, dhcp, err := b.connectModem(ctx, cfg.Network.WAN.Modem)
 		if err != nil {
+			// Don't abort — the AP/LAN/admin UI must still come up so the
+			// user can fix the SIM/APN. But record the reason: the apply
+			// otherwise "succeeds" with WAN down, and the UI would only
+			// show a bare "failed". ModemStatus surfaces modemErr.
 			b.logger.Printf("applyRouter: modem: %v (continuing, WAN down)", err)
+			b.setModemErr(err.Error())
+			b.setModemIface("")
 			wan = ""
 		} else {
+			b.setModemErr("")
+			b.setModemIface(iface)
 			wan, modemDHCP = iface, dhcp
 			b.logger.Printf("applyRouter: cellular WAN up on %s (dhcp=%v)", wan, dhcp)
 		}

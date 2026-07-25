@@ -111,6 +111,20 @@ type ModemStatus struct {
 	// LockRequired is the SIM lock state ("sim-pin", "sim-puk", or
 	// "" when unlocked) — the UI prompts for a PIN when it's sim-pin.
 	LockRequired string `json:"lock_required,omitempty"`
+	// SIMSlots is the number of SIM slots the modem exposes. >1 means the
+	// active SIM can be switched (--set-primary-sim-slot); the UI shows a
+	// slot selector only then. 0/1 = single-slot modem, no switching.
+	SIMSlots int `json:"sim_slots,omitempty"`
+	// PrimarySlot is the currently-active SIM slot (1-based), meaningful
+	// only when SIMSlots > 1.
+	PrimarySlot int `json:"primary_slot,omitempty"`
+	// LastError is the human-readable reason the most recent connect
+	// attempt failed (mmcli stderr + the modem's state-failed-reason).
+	// Empty when the modem is connected or has never failed. The apply
+	// path deliberately doesn't abort on a modem failure — so the AP
+	// stays up — which means this is the ONLY place the real reason
+	// (bad APN, sim-pin, no registration) surfaces to the user.
+	LastError string `json:"last_error,omitempty"`
 }
 
 // WANStatus is the runtime state of the Ethernet WAN interface in

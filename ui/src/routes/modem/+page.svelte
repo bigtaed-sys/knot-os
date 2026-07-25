@@ -12,6 +12,7 @@
 	let hasPin = $state(false);
 	let pin = $state('');
 	let pinTouched = $state(false);
+	let simSlot = $state(0);
 	let routerMode = $state(true);
 
 	let loading = $state(true);
@@ -30,6 +31,7 @@
 				apn = r.apn;
 				username = r.username;
 				hasPin = r.has_pin;
+				simSlot = r.sim_slot;
 			}
 			error = null;
 		} catch (e) {
@@ -51,6 +53,7 @@
 		try {
 			const body: Record<string, unknown> = { as_wan: asWAN, apn, username };
 			if (pinTouched) body.pin = pin;
+			if ((status.sim_slots ?? 0) > 1) body.sim_slot = simSlot;
 			await apiPut('/modem', body, { timeoutMs: 60000 });
 			savedFlash = true;
 			setTimeout(() => (savedFlash = false), 2500);
@@ -161,6 +164,16 @@
 				<i class="bi bi-lock"></i>{$_('modem.pin_required')}
 			</div>
 		{/if}
+
+		{#if status.last_error && status.state !== 'connected'}
+			<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
+				<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>
+				<span>
+					<span class="font-medium">{$_('modem.connect_failed')}</span>
+					<span class="block mt-0.5 font-mono text-xs break-all">{status.last_error}</span>
+				</span>
+			</div>
+		{/if}
 	</section>
 
 	<!-- Settings -->
@@ -174,10 +187,38 @@
 		</label>
 
 		<div>
-			<label class="label" for="apn">{$_('modem.apn')}</label>
+			<label class="label" for="apn">
+				{$_('modem.apn')}
+				<span class="font-normal text-zinc-400 dark:text-zinc-500">({$_('modem.optional')})</span>
+			</label>
 			<input id="apn" class="input font-mono" bind:value={apn} placeholder="internet" />
 			<p class="help">{$_('modem.apn_help')}</p>
 		</div>
+
+		{#if (status.sim_slots ?? 0) > 1}
+			<div>
+				<span class="label">{$_('modem.sim_slot')}</span>
+				<div class="flex flex-wrap gap-2 mt-1">
+					{#each Array(status.sim_slots) as slotEntry, i (i)}
+						{@const slot = i + 1}
+						<button
+							type="button"
+							onclick={() => (simSlot = slot)}
+							class="px-4 py-2 rounded-md border text-sm
+								{simSlot === slot
+									? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+									: 'border-zinc-200 dark:border-zinc-700'}"
+						>
+							{$_('modem.sim_slot_n', { values: { n: slot } })}
+							{#if status.primary_slot === slot}
+								<span class="badge badge-ok text-[10px] ml-1">{$_('modem.sim_slot_active')}</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+				<p class="help">{$_('modem.sim_slot_help')}</p>
+			</div>
+		{/if}
 
 		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			<div>
