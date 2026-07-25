@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.8] — 2026-07-25
+
+### Added
+
+- **Telegram bypass proxy.** The Zapret page is now **Censorship bypass** with two tabs: **DPI** (the existing nfqws bypass for YouTube/Discord) and **Telegram** — a local MTProto/SOCKS5 proxy (d0mhate/tg-ws-proxy, MIT, supervised like nfqws) that tunnels Telegram to its servers over WebSocket so it works where it's blocked. Enable it, and phones on your network add the router as a Telegram proxy via a generated `tg://` link (tap on mobile, or copy). Off by default; the arm64 binary is downloaded on demand (sha256-pinned) on first enable.
+
 ## [2026.07.7] — 2026-07-25
 
 ### Added

@@ -1,14 +1,98 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, apiPost, ApiError } from '$lib/api';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type {
 		ZapretResponse,
 		ZapretPreset,
 		ZapretAutoTuneResponse,
 		ZapretTuneResult
 	} from '$lib/types';
+
+	let activeTab = $state('dpi');
+	const tabList = $derived([
+		{ id: 'dpi', label: $_('zapret.tab_dpi'), icon: 'bi-magic' },
+		{ id: 'telegram', label: $_('zapret.tab_telegram'), icon: 'bi-telegram' }
+	]);
+
+	// Telegram proxy state
+	interface TGProxy {
+		enabled: boolean;
+		mode: string;
+		port: number;
+		has_secret: boolean;
+		lan_ip: string;
+		tg_link: string;
+		status: { running: boolean; binary_present: boolean; router_mode: boolean };
+	}
+	let tg = $state<TGProxy | null>(null);
+	let tgEnabled = $state(false);
+	let tgMode = $state('mtproto');
+	let tgPort = $state(8443);
+	let tgSecret = $state('');
+	let tgSecretTouched = $state(false);
+	let tgSaving = $state(false);
+	let tgCopied = $state(false);
+
+	async function loadTG(initial = false) {
+		try {
+			const r = await apiGet<TGProxy>('/tgproxy');
+			tg = r;
+			if (initial) {
+				tgEnabled = r.enabled;
+				tgMode = r.mode || 'mtproto';
+				tgPort = r.port || 8443;
+			}
+		} catch {
+			/* transient */
+		}
+	}
+
+	async function genSecret() {
+		try {
+			const r = await apiPost<{ secret: string }>('/tgproxy/secret', {});
+			tgSecret = r.secret;
+			tgSecretTouched = true;
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function saveTG() {
+		tgSaving = true;
+		error = null;
+		try {
+			const body: Record<string, unknown> = { enabled: tgEnabled, mode: tgMode, port: tgPort };
+			if (tgSecretTouched && tgSecret.trim()) body.secret = tgSecret.trim();
+			await apiPut('/tgproxy', body, { timeoutMs: 60000 });
+			tgSecret = '';
+			tgSecretTouched = false;
+			await loadTG(true);
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const b = e.body as { error?: { message?: string } } | undefined;
+				error = b?.error?.message ?? e.message;
+			} else {
+				error = e instanceof Error ? e.message : String(e);
+			}
+		} finally {
+			tgSaving = false;
+		}
+	}
+
+	async function copyTGLink() {
+		if (!tg?.tg_link) return;
+		try {
+			await navigator.clipboard.writeText(tg.tg_link);
+			tgCopied = true;
+			setTimeout(() => (tgCopied = false), 2000);
+		} catch {
+			/* clipboard blocked */
+		}
+	}
 
 	let enabled = $state(false);
 	let strategy = $state('general');
@@ -142,7 +226,10 @@
 		}
 	}
 
-	onMount(refresh);
+	onMount(() => {
+		refresh();
+		loadTG(true);
+	});
 </script>
 
 <svelte:head>
@@ -159,6 +246,11 @@
 		<div class="spinner"></div>
 	</div>
 {:else}
+	<Tabs tabs={tabList} bind:active={activeTab} />
+
+	{#key activeTab}
+	<div in:fade={{ duration: 140 }}>
+	{#if activeTab === 'dpi'}
 	{#if !status.router_mode}
 		<div class="surface border-amber-300 dark:border-amber-500/30 p-4 mb-5 text-sm flex items-start gap-3">
 			<i class="bi bi-info-circle text-amber-500 text-lg mt-0.5"></i>
@@ -367,4 +459,116 @@
 	<p class="text-xs text-zinc-500 dark:text-zinc-400 mt-4">
 		<i class="bi bi-info-circle mr-1"></i>{$_('zapret.tip')}
 	</p>
+	{/if}
+
+	{#if activeTab === 'telegram'}
+		{#if tg && !tg.status.router_mode}
+			<div class="surface border-amber-300 dark:border-amber-500/30 p-4 mb-5 text-sm flex items-start gap-3">
+				<i class="bi bi-info-circle text-amber-500 text-lg mt-0.5"></i>
+				<span>{$_('zapret.tg_not_router')}</span>
+			</div>
+		{/if}
+
+		<header class="mb-4">
+			<h2 class="font-semibold flex items-center gap-2">
+				<i class="bi bi-telegram text-brand-500"></i>{$_('zapret.tg_title')}
+			</h2>
+			<p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">{$_('zapret.tg_subtitle')}</p>
+		</header>
+
+		<!-- Enable -->
+		<section class="surface p-5 mb-5">
+			<label class="flex items-start gap-3 cursor-pointer">
+				<input type="checkbox" class="rounded text-brand-600 mt-1" bind:checked={tgEnabled} />
+				<span class="flex-1">
+					<span class="font-medium flex items-center gap-2">
+						{$_('zapret.tg_enable')}
+						{#if tgEnabled && tg?.status.running}
+							<span class="badge badge-ok"><i class="bi bi-broadcast"></i> {$_('zapret.tg_running')}</span>
+						{:else if tgEnabled && !tg?.status.running}
+							<span class="badge badge-warn"><i class="bi bi-pause-circle"></i> {$_('zapret.tg_not_running')}</span>
+						{/if}
+					</span>
+					<span class="text-sm text-zinc-500 dark:text-zinc-400 block mt-0.5">{$_('zapret.tg_enable_help')}</span>
+				</span>
+			</label>
+			{#if tgEnabled && tg && !tg.status.binary_present}
+				<div class="mt-3 text-xs text-zinc-500 dark:text-zinc-400 flex items-start gap-2 pl-7">
+					<i class="bi bi-cloud-arrow-down mt-0.5"></i><span>{$_('zapret.tg_will_download')}</span>
+				</div>
+			{/if}
+		</section>
+
+		<!-- Settings -->
+		<section class="surface p-5 mb-5 space-y-4" class:opacity-60={!tgEnabled}>
+			<div>
+				<span class="label">{$_('zapret.tg_mode')}</span>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+					{#each [{ id: 'mtproto', label: $_('zapret.tg_mode_mtproto') }, { id: 'socks5', label: $_('zapret.tg_mode_socks5') }] as m (m.id)}
+						<button
+							type="button"
+							disabled={!tgEnabled}
+							onclick={() => (tgMode = m.id)}
+							class="p-3 rounded-md border text-sm text-left
+								{tgMode === m.id ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10' : 'border-zinc-200 dark:border-zinc-700'}"
+						>
+							{m.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+				<div>
+					<label class="label" for="tgport">{$_('zapret.tg_port')}</label>
+					<input id="tgport" class="input font-mono" type="number" min="1" max="65535" bind:value={tgPort} disabled={!tgEnabled} />
+				</div>
+				{#if tgMode === 'mtproto'}
+					<div>
+						<label class="label" for="tgsecret">{$_('zapret.tg_secret')}</label>
+						<div class="flex gap-2">
+							<input
+								id="tgsecret"
+								class="input font-mono flex-1"
+								bind:value={tgSecret}
+								oninput={() => (tgSecretTouched = true)}
+								placeholder={tg?.has_secret ? '••••••••' : ''}
+								disabled={!tgEnabled}
+							/>
+							<button class="btn-ghost shrink-0" type="button" onclick={genSecret} disabled={!tgEnabled}>
+								{$_('zapret.tg_secret_gen')}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+			<div class="flex items-center gap-2">
+				<button class="btn-primary" type="button" disabled={tgSaving} onclick={saveTG}>
+					{#if tgSaving}<span class="spinner"></span>{$_('common.saving')}{:else}<i class="bi bi-check2"></i>{$_('zapret.save')}{/if}
+				</button>
+			</div>
+		</section>
+
+		<!-- tg:// link -->
+		{#if tg?.tg_link}
+			<section class="surface p-5 mb-5">
+				<h3 class="font-medium mb-1">{$_('zapret.tg_link_title')}</h3>
+				<p class="text-sm text-zinc-500 dark:text-zinc-400 mb-3">{$_('zapret.tg_link_help')}</p>
+				<a
+					href={tg.tg_link}
+					class="btn-primary w-full sm:w-auto"
+				>
+					<i class="bi bi-telegram"></i>{$_('zapret.tg_link_title')}
+				</a>
+				<div class="mt-3 flex items-center gap-2">
+					<code class="text-xs bg-zinc-100 dark:bg-zinc-800 rounded px-2 py-1 font-mono break-all flex-1">{tg.tg_link}</code>
+					<button class="btn-ghost shrink-0 text-sm" type="button" onclick={copyTGLink}>
+						<i class="bi {tgCopied ? 'bi-check2' : 'bi-clipboard'}"></i>
+						{tgCopied ? $_('zapret.tg_link_copied') : $_('zapret.tg_link_copy')}
+					</button>
+				</div>
+			</section>
+		{/if}
+	{/if}
+	</div>
+	{/key}
 {/if}
