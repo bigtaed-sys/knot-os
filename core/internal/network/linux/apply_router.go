@@ -257,11 +257,11 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	//    second `dhcp-range=<iface>,...` line; dnsmasq picks the
 	//    interface based on the DHCP request's source.
 	dnsmasqConf := BuildDnsmasqConf(DnsmasqParams{
-		Interface:     IfaceWlan,
-		ListenIP:      gw,
-		DHCPPoolStart: lan.DHCP.PoolStart,
-		DHCPPoolEnd:   lan.DHCP.PoolEnd,
-		DisableDNS:    true,
+		Interface:       IfaceWlan,
+		ListenIP:        gw,
+		DHCPPoolStart:   lan.DHCP.PoolStart,
+		DHCPPoolEnd:     lan.DHCP.PoolEnd,
+		DisableDNS:      true,
 		ExtraInterfaces: guestDnsmasqExtras(guestBSS),
 	})
 	if err := writeRuntimeFile(DnsmasqConfPath, dnsmasqConf); err != nil {

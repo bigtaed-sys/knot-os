@@ -201,6 +201,12 @@ type Modem struct {
 	// the right default for the common single-SIM modem. Inert on modems
 	// that report a single slot.
 	SIMSlot int `yaml:"sim_slot,omitempty" json:"sim_slot,omitempty"`
+	// DataLimitMB is an optional monthly data cap in megabytes for the
+	// usage meter/alert. 0 means no cap (just track usage).
+	DataLimitMB int `yaml:"data_limit_mb,omitempty" json:"data_limit_mb,omitempty"`
+	// CycleResetDay is the day of month (1..28) the usage counter resets,
+	// matching the carrier's billing cycle. 0 defaults to 1.
+	CycleResetDay int `yaml:"cycle_reset_day,omitempty" json:"cycle_reset_day,omitempty"`
 }
 
 // LAN is the IPv4 subnet config for the AP side.

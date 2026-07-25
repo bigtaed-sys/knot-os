@@ -28,6 +28,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/guest"
 	"github.com/knot-os/knot-os/core/internal/httpserver"
+	"github.com/knot-os/knot-os/core/internal/modemmetrics"
 	"github.com/knot-os/knot-os/core/internal/network"
 	netlinux "github.com/knot-os/knot-os/core/internal/network/linux"
 	"github.com/knot-os/knot-os/core/internal/notify"
@@ -720,6 +721,39 @@ func main() {
 		}
 		bandwidth.NewLinuxSampler(bwTracker, devices, lan).Run(ctx)
 	}()
+
+	// Cellular data usage + signal history. The linux backend's modem
+	// watchdog feeds byte counters + signal into the tracker each tick
+	// (no-op observer off Linux). Usage is persisted so a reboot doesn't
+	// lose the month's total; the billing cycle resets on the configured
+	// day. Wired unconditionally — the observer just never fires without
+	// a modem WAN.
+	modemResetDay := 1
+	if cfg.Network.WAN != nil && cfg.Network.WAN.Modem != nil && cfg.Network.WAN.Modem.CycleResetDay > 0 {
+		modemResetDay = cfg.Network.WAN.Modem.CycleResetDay
+	}
+	mmTracker := modemmetrics.New(modemResetDay, modemmetrics.DefaultStorePath)
+	if err := mmTracker.Load(); err != nil {
+		logger.Printf("modem-usage: load: %v", err)
+	}
+	apiSrv.SetModemMetrics(mmTracker)
+	if lb, ok := backend.(*netlinux.LinuxBackend); ok {
+		lb.SetModemObserver(mmTracker.Observe)
+	}
+	go func() {
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				_ = mmTracker.Save()
+				return
+			case <-t.C:
+				_ = mmTracker.Save()
+			}
+		}
+	}()
+
 	if tlsMaterials != nil {
 		apiSrv.SetTLSMaterials(tlsMaterials, func() knottls.LeafSubject {
 			return leafSubjectFor(apiSrv.Snapshot())

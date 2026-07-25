@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/config"
+	"github.com/knot-os/knot-os/core/internal/modemmetrics"
 	"github.com/knot-os/knot-os/core/internal/network"
 )
 
@@ -27,6 +28,10 @@ func (s *Server) MountModem(r chi.Router) {
 	r.Put("/modem", s.handlePutModem)
 }
 
+// SetModemMetrics wires the cellular usage/signal tracker so GET /modem
+// can report data usage against the cap and a signal sparkline.
+func (s *Server) SetModemMetrics(t *modemmetrics.Tracker) { s.modemMetrics = t }
+
 func (s *Server) handleGetModem(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Snapshot()
 	m := config.Modem{}
@@ -42,27 +47,35 @@ func (s *Server) handleGetModem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"as_wan":   asWAN,
-		"apn":      m.APN,
-		"username": m.Username,
-		"has_pin":  m.PIN != "",
-		"sim_slot": m.SIMSlot,
-		"status":   status,
+	resp := map[string]any{
+		"as_wan":          asWAN,
+		"apn":             m.APN,
+		"username":        m.Username,
+		"has_pin":         m.PIN != "",
+		"sim_slot":        m.SIMSlot,
+		"data_limit_mb":   m.DataLimitMB,
+		"cycle_reset_day": m.CycleResetDay,
+		"status":          status,
 		// router_mode tells the UI a modem can only be the WAN in
 		// full-router mode (the extender uses a Wi-Fi uplink).
 		"router_mode": cfg.Role == config.RoleWiFiRouter,
-	})
+	}
+	if s.modemMetrics != nil {
+		resp["usage"] = s.modemMetrics.Snapshot()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handlePutModem(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		AsWAN    bool    `json:"as_wan"`
-		APN      string  `json:"apn"`
-		Username string  `json:"username"`
-		Password string  `json:"password"`
-		PIN      *string `json:"pin"`      // nil = leave unchanged; "" = clear
-		SIMSlot  *int    `json:"sim_slot"` // nil = leave unchanged
+		AsWAN         bool    `json:"as_wan"`
+		APN           string  `json:"apn"`
+		Username      string  `json:"username"`
+		Password      string  `json:"password"`
+		PIN           *string `json:"pin"`      // nil = leave unchanged; "" = clear
+		SIMSlot       *int    `json:"sim_slot"` // nil = leave unchanged
+		DataLimitMB   *int    `json:"data_limit_mb"`
+		CycleResetDay *int    `json:"cycle_reset_day"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
@@ -87,6 +100,15 @@ func (s *Server) handlePutModem(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.SIMSlot != nil {
 		m.SIMSlot = *body.SIMSlot
+	}
+	if body.DataLimitMB != nil {
+		m.DataLimitMB = *body.DataLimitMB
+	}
+	if body.CycleResetDay != nil {
+		m.CycleResetDay = *body.CycleResetDay
+		if s.modemMetrics != nil {
+			s.modemMetrics.SetResetDay(m.CycleResetDay)
+		}
 	}
 	incoming.Network.WAN.Modem = &m
 	if body.AsWAN {

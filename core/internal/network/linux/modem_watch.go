@@ -5,6 +5,7 @@ package linux
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/knot-os/knot-os/core/internal/config"
@@ -93,6 +94,8 @@ func (b *LinuxBackend) modemWatchOnce(ctx context.Context, lastReset *time.Time)
 		return
 	}
 
+	b.sampleModemMetrics(kv)
+
 	switch modemActionFor(kv["modem.generic.state"]) {
 	case modemNoAction:
 		b.setModemErr("")
@@ -112,6 +115,25 @@ func (b *LinuxBackend) modemWatchOnce(ctx context.Context, lastReset *time.Time)
 		// disconnecting …). Bring the data link back up.
 		b.reconnectModemWAN(ctx)
 	}
+}
+
+// sampleModemMetrics feeds one tick of cellular metrics to the observer
+// (if set): the data-interface byte counters and the modem's signal
+// quality. Best-effort — a down interface just yields no byte counters.
+func (b *LinuxBackend) sampleModemMetrics(kv map[string]string) {
+	obs := b.modemObserverFn()
+	if obs == nil {
+		return
+	}
+	signal := -1
+	if v := kv["modem.generic.signal-quality.value"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			signal = n
+		}
+	}
+	iface := b.lastModemIface()
+	rx, tx, _ := readNetdevBytes(iface)
+	obs(time.Now(), iface, rx, tx, signal)
 }
 
 // modemAction is the watchdog's decision for a given ModemManager state.

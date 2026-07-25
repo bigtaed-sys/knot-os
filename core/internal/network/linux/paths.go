@@ -33,9 +33,9 @@ const (
 // on phy0 at startup. ap_guest is the optional secondary BSS that
 // comes up only when a guest session is active.
 const (
-	IfaceWlan     = "wlan0"
-	IfaceAP       = "ap0"
-	IfaceAPGuest  = "ap_guest"
+	IfaceWlan    = "wlan0"
+	IfaceAP      = "ap0"
+	IfaceAPGuest = "ap_guest"
 )
 
 // GuestLANCIDR is the dedicated /24 the guest BSS lives on. Distinct

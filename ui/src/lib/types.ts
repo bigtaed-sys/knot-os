@@ -477,12 +477,28 @@ export interface ModemStatus {
 	primary_slot?: number;
 }
 
+export interface ModemSignalSample {
+	at: string;
+	percent: number;
+}
+
+export interface ModemUsage {
+	cycle_start: string;
+	rx_bytes: number;
+	tx_bytes: number;
+	total_bytes: number;
+	signal: ModemSignalSample[];
+}
+
 export interface ModemResponse {
 	as_wan: boolean;
 	apn: string;
 	username: string;
 	has_pin: boolean;
 	sim_slot: number;
+	data_limit_mb: number;
+	cycle_reset_day: number;
+	usage?: ModemUsage;
 	status: ModemStatus;
 	router_mode: boolean;
 }

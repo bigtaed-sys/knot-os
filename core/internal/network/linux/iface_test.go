@@ -6,9 +6,9 @@ import "testing"
 
 func TestFlipLocalBit(t *testing.T) {
 	cases := []struct {
-		in   string
-		out  string
-		ok   bool
+		in  string
+		out string
+		ok  bool
 	}{
 		{"dc:a6:32:11:22:33", "de:a6:32:11:22:33", true}, // 0xdc XOR 0x02 = 0xde
 		{"de:a6:32:11:22:33", "dc:a6:32:11:22:33", true}, // round-trip

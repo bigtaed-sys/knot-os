@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/network"
@@ -67,3 +68,7 @@ func (b *LinuxBackend) SetGuestProvider(_ GuestSessionProvider) {}
 
 // LiveModemIface has no meaning off Linux (no ModemManager).
 func (b *LinuxBackend) LiveModemIface() string { return "" }
+
+// SetModemObserver is a no-op off Linux (no cellular metrics source).
+func (b *LinuxBackend) SetModemObserver(_ func(at time.Time, iface string, rxBytes, txBytes uint64, signal int)) {
+}

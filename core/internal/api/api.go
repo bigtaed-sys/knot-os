@@ -26,6 +26,7 @@ import (
 	"github.com/knot-os/knot-os/core/internal/deviceregistry"
 	"github.com/knot-os/knot-os/core/internal/events"
 	"github.com/knot-os/knot-os/core/internal/guest"
+	"github.com/knot-os/knot-os/core/internal/modemmetrics"
 	"github.com/knot-os/knot-os/core/internal/network"
 	"github.com/knot-os/knot-os/core/internal/notify"
 	"github.com/knot-os/knot-os/core/internal/plugin"
@@ -70,6 +71,7 @@ type Server struct {
 	routingProvider func() (routing.Result, error)
 	applyCoord      *applycoord.Coordinator
 	bandwidth       *bandwidth.Tracker
+	modemMetrics    *modemmetrics.Tracker
 	zapret          *zapret.Manager
 	guest           *guest.Registry
 	notify          *notify.Store

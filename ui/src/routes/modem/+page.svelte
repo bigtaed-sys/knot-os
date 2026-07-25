@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { _ } from 'svelte-i18n';
 	import { apiGet, apiPut, ApiError } from '$lib/api';
-	import type { ModemResponse, ModemStatus } from '$lib/types';
+	import type { ModemResponse, ModemStatus, ModemUsage } from '$lib/types';
 
 	let status = $state<ModemStatus>({ present: false, signal_percent: 0 });
 	let asWAN = $state(false);
@@ -13,6 +13,9 @@
 	let pin = $state('');
 	let pinTouched = $state(false);
 	let simSlot = $state(0);
+	let dataLimitMB = $state(0);
+	let cycleResetDay = $state(1);
+	let usage = $state<ModemUsage | null>(null);
 	let routerMode = $state(true);
 
 	let loading = $state(true);
@@ -26,12 +29,15 @@
 			const r = await apiGet<ModemResponse>('/modem');
 			status = r.status;
 			routerMode = r.router_mode;
+			usage = r.usage ?? null;
 			if (initial) {
 				asWAN = r.as_wan;
 				apn = r.apn;
 				username = r.username;
 				hasPin = r.has_pin;
 				simSlot = r.sim_slot;
+				dataLimitMB = r.data_limit_mb;
+				cycleResetDay = r.cycle_reset_day || 1;
 			}
 			error = null;
 		} catch (e) {
@@ -51,7 +57,13 @@
 		saving = true;
 		error = null;
 		try {
-			const body: Record<string, unknown> = { as_wan: asWAN, apn, username };
+			const body: Record<string, unknown> = {
+				as_wan: asWAN,
+				apn,
+				username,
+				data_limit_mb: dataLimitMB,
+				cycle_reset_day: cycleResetDay
+			};
 			if (pinTouched) body.pin = pin;
 			if ((status.sim_slots ?? 0) > 1) body.sim_slot = simSlot;
 			await apiPut('/modem', body, { timeoutMs: 60000 });
@@ -76,6 +88,20 @@
 		if (pct <= 0) return 0;
 		return Math.max(1, Math.min(4, Math.ceil(pct / 25)));
 	}
+
+	function fmtBytes(n: number): string {
+		if (!n) return '0 B';
+		const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+		const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+		return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : i < 3 ? 1 : 2)} ${u[i]}`;
+	}
+
+	// Usage as a fraction of the cap (0..1), and percent for the bar.
+	const limitBytes = $derived(dataLimitMB > 0 ? dataLimitMB * 1024 * 1024 : 0);
+	const usedFrac = $derived(
+		limitBytes > 0 && usage ? Math.min(1, usage.total_bytes / limitBytes) : 0
+	);
+	const overLimit = $derived(limitBytes > 0 && !!usage && usage.total_bytes >= limitBytes);
 
 	const stateColor = $derived(
 		status.state === 'connected'
@@ -176,6 +202,58 @@
 		{/if}
 	</section>
 
+	<!-- Data usage + signal history -->
+	{#if usage}
+		<section class="surface p-5 mb-5">
+			<div class="flex items-center justify-between gap-3 mb-3">
+				<h2 class="font-medium">{$_('modem.usage_title')}</h2>
+				<span class="text-xs text-zinc-500 dark:text-zinc-400">
+					{$_('modem.usage_since', { values: { date: new Date(usage.cycle_start).toLocaleDateString() } })}
+				</span>
+			</div>
+
+			<div class="flex items-baseline gap-2">
+				<span class="text-2xl font-semibold tabular-nums">{fmtBytes(usage.total_bytes)}</span>
+				{#if dataLimitMB > 0}
+					<span class="text-sm text-zinc-500 dark:text-zinc-400">/ {fmtBytes(limitBytes)}</span>
+				{/if}
+			</div>
+			<div class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 flex gap-4">
+				<span><i class="bi bi-arrow-down text-emerald-500"></i> {fmtBytes(usage.rx_bytes)}</span>
+				<span><i class="bi bi-arrow-up text-sky-500"></i> {fmtBytes(usage.tx_bytes)}</span>
+			</div>
+
+			{#if dataLimitMB > 0}
+				<div class="mt-3 h-2 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+					<div
+						class="h-full rounded-full {overLimit ? 'bg-red-500' : usedFrac > 0.8 ? 'bg-amber-500' : 'bg-brand-500'}"
+						style="width: {Math.round(usedFrac * 100)}%"
+					></div>
+				</div>
+				{#if overLimit}
+					<p class="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+						<i class="bi bi-exclamation-triangle-fill"></i>{$_('modem.usage_over')}
+					</p>
+				{/if}
+			{/if}
+
+			{#if usage.signal.length > 1}
+				<div class="mt-4">
+					<div class="text-xs text-zinc-500 dark:text-zinc-400 mb-1">{$_('modem.signal_history')}</div>
+					<div class="flex items-end gap-px h-10">
+						{#each usage.signal.slice(-60) as s (s.at)}
+							<div
+								class="flex-1 min-w-px rounded-sm bg-brand-400/80 dark:bg-brand-500/60"
+								style="height: {Math.max(4, s.percent)}%"
+								title="{s.percent}%"
+							></div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+		</section>
+	{/if}
+
 	<!-- Settings -->
 	<section class="surface p-5 mb-5 space-y-4">
 		<label class="flex items-start gap-3 cursor-pointer">
@@ -237,6 +315,33 @@
 				<label class="label" for="user">{$_('modem.username')}</label>
 				<input id="user" class="input" bind:value={username} placeholder={$_('modem.optional')} />
 				<p class="help">{$_('modem.username_help')}</p>
+			</div>
+		</div>
+
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+			<div>
+				<label class="label" for="limit">{$_('modem.data_limit')}</label>
+				<input
+					id="limit"
+					class="input font-mono"
+					type="number"
+					min="0"
+					bind:value={dataLimitMB}
+					placeholder="0"
+				/>
+				<p class="help">{$_('modem.data_limit_help')}</p>
+			</div>
+			<div>
+				<label class="label" for="cycle">{$_('modem.cycle_reset_day')}</label>
+				<input
+					id="cycle"
+					class="input font-mono"
+					type="number"
+					min="1"
+					max="28"
+					bind:value={cycleResetDay}
+				/>
+				<p class="help">{$_('modem.cycle_reset_day_help')}</p>
 			</div>
 		</div>
 	</section>

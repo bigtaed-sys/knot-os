@@ -378,6 +378,30 @@ func (b *LinuxBackend) keepModemAwake(iface string) {
 	b.logger.Printf("modem: USB autosuspend disabled on %d node(s) for %s", n, iface)
 }
 
+// readNetdevBytes reads the kernel's cumulative rx/tx byte counters for
+// iface from sysfs. ok=false when the interface is gone (modem down) or
+// the counters can't be read.
+func readNetdevBytes(iface string) (rx, tx uint64, ok bool) {
+	if iface == "" {
+		return 0, 0, false
+	}
+	rx, okRx := readUintFile(filepath.Join("/sys/class/net", iface, "statistics", "rx_bytes"))
+	tx, okTx := readUintFile(filepath.Join("/sys/class/net", iface, "statistics", "tx_bytes"))
+	return rx, tx, okRx && okTx
+}
+
+func readUintFile(path string) (uint64, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // applyBearerStatic applies the ModemManager-negotiated IPv4 config to
 // the data interface and installs a default route via its gateway.
 func (b *LinuxBackend) applyBearerStatic(ctx context.Context, iface string, bkv map[string]string) error {

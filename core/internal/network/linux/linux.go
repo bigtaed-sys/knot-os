@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/knot-os/knot-os/core/internal/config"
 	"github.com/knot-os/knot-os/core/internal/network"
@@ -33,9 +34,9 @@ type LinuxBackend struct {
 	HTTPPort int
 
 	// supervised processes
-	hostapd      *supervisedProc
-	wpaSupp      *supervisedProc
-	dnsmasq      *supervisedProc
+	hostapd *supervisedProc
+	wpaSupp *supervisedProc
+	dnsmasq *supervisedProc
 
 	// guestProvider, when non-nil, is queried on every Apply for
 	// the currently-active guest session. The session drives a
@@ -58,6 +59,25 @@ type LinuxBackend struct {
 	modemErr         string
 	modemIface       string
 	modemWatchCancel context.CancelFunc
+
+	// modemObserver, when set, is called each watchdog tick with the live
+	// cellular metrics (data-interface byte counters + signal). main.go
+	// wires it to the modemmetrics tracker. Guarded by modemMu.
+	modemObserver func(at time.Time, iface string, rxBytes, txBytes uint64, signal int)
+}
+
+// SetModemObserver registers a sink for per-tick cellular metrics. Pass
+// nil to disable. Called by main.go to feed the usage/signal tracker.
+func (b *LinuxBackend) SetModemObserver(fn func(at time.Time, iface string, rxBytes, txBytes uint64, signal int)) {
+	b.modemMu.Lock()
+	b.modemObserver = fn
+	b.modemMu.Unlock()
+}
+
+func (b *LinuxBackend) modemObserverFn() func(time.Time, string, uint64, uint64, int) {
+	b.modemMu.Lock()
+	defer b.modemMu.Unlock()
+	return b.modemObserver
 }
 
 // setModemIface records the modem's live data interface (or "" when the
