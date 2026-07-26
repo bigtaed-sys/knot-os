@@ -25,36 +25,62 @@ type Bot struct {
 
 	// Data-source callbacks. main.go wires these up so the bot
 	// has read access to live state without owning it.
-	StatusFn   func() StatusSnapshot
-	DevicesFn  func() []DeviceSnapshot
-	ProfilesFn func() []ProfileSnapshot
-	WakeFn     func(mac string) error
-	SetProfileFn func(mac, profileID string) error
-	ProtectionFn func() ProtectionSnapshot
-	SetDNSModeFn func(mode string) error
-	GuestFn      func() *GuestSnapshot
+	StatusFn      func() StatusSnapshot
+	DevicesFn     func() []DeviceSnapshot
+	ProfilesFn    func() []ProfileSnapshot
+	WakeFn        func(mac string) error
+	SetProfileFn  func(mac, profileID string) error
+	ProtectionFn  func() ProtectionSnapshot
+	SetDNSModeFn  func(mode string) error
+	GuestFn       func() *GuestSnapshot
 	RevokeGuestFn func() error
-	RoutingFn    func() *RoutingSnapshot
+	RoutingFn     func() *RoutingSnapshot
 
 	mu       sync.Mutex
 	running  bool
 	cancelFn context.CancelFunc
-	client   *telegramClient
+	client   botClient
 	subID    uint64
+
+	// MTProto transport (gogram): set by main.go before Start. When the
+	// bot's app_id/app_hash are configured it connects via MTProto
+	// (through mtproxyURL, if set) instead of the HTTP Bot API.
+	mtproxyURL  string
+	sessionPath string
+}
+
+// botClient is the transport the bot drives: the HTTP Bot API client, or
+// the MTProto (gogram) client when api.telegram.org is blocked.
+type botClient interface {
+	GetMe(ctx context.Context) (*User, error)
+	GetUpdates(ctx context.Context, offset int64, timeout int) ([]Update, error)
+	SendMessage(ctx context.Context, req SendMessageReq) error
+	EditMessageText(ctx context.Context, req EditMessageReq) error
+	AnswerCallbackQuery(ctx context.Context, req AnswerCallbackQueryReq) error
+}
+
+// SetMTProxy configures the MTProto path: the tg:// proxy URL to dial
+// through (empty = direct) and where to persist the gogram session.
+// Called by main.go before Start.
+func (b *Bot) SetMTProxy(proxyURL, sessionPath string) {
+	b.mu.Lock()
+	b.mtproxyURL = proxyURL
+	b.sessionPath = sessionPath
+	b.mu.Unlock()
 }
 
 // StatusSnapshot is what /status renders. main.go fills this from
 // the live config + backend + device registry.
 type StatusSnapshot struct {
-	Role           string // "setup" | "wifi-extender" | "wifi-router"
-	DeviceName     string
-	Version        string
-	WANUp          bool
-	WANIface       string
-	WANIP          string
-	APSSID         string
-	APUp           bool
-	OnlineDevices  int
+	Role          string // "setup" | "wifi-extender" | "wifi-router"
+	DeviceName    string
+	Version       string
+	WANUp         bool
+	WANIface      string
+	WANIP         string
+	APSSID        string
+	APUp          bool
+	OnlineDevices int
 }
 
 // DeviceSnapshot is one row in /devices.
@@ -144,7 +170,19 @@ func (b *Bot) Start(parent context.Context) error {
 		b.logger.Printf("notify: bot token not configured; bot loop is idle")
 		return nil
 	}
-	b.client = newTelegramClient(st.BotToken)
+	// MTProto transport when app_id/app_hash are set (works where the HTTP
+	// Bot API is blocked, dialing through the local proxy); HTTP otherwise.
+	if st.AppID > 0 && st.AppHash != "" {
+		cl, err := newMTProtoClient(parent, st.AppID, st.AppHash, st.BotToken, b.mtproxyURL, b.sessionPath)
+		if err != nil {
+			b.logger.Printf("notify: MTProto transport failed: %v", err)
+			return err
+		}
+		b.client = cl
+		b.logger.Printf("notify: MTProto transport (app_id=%d, via_proxy=%v)", st.AppID, b.mtproxyURL != "")
+	} else {
+		b.client = newTelegramClient(st.BotToken)
+	}
 
 	// Verify the token by calling /getMe; cache the resulting
 	// username for the UI link button.

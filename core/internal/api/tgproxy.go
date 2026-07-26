@@ -57,8 +57,8 @@ func (s *Server) handleGetTGProxy(w http.ResponseWriter, _ *http.Request) {
 		"enabled":    set.Enabled,
 		"port":       port,
 		"has_secret": set.Secret != "",
-		"lan_ip":   set.LinkIP,
-		"tg_link":  tgproxy.TGLink(set),
+		"lan_ip":     set.LinkIP,
+		"tg_link":    tgproxy.TGLink(set),
 		"status": map[string]any{
 			"running":        running,
 			"binary_present": binaryPresent,

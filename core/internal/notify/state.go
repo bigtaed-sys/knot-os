@@ -53,6 +53,11 @@ type State struct {
 	// PrimaryLang is the language new chats default to. Either
 	// "ru" or "en"; falls back to "ru" if unset.
 	PrimaryLang string `yaml:"primary_lang,omitempty" json:"primary_lang,omitempty"`
+	// AppID / AppHash are the my.telegram.org API credentials. When both
+	// are set the bot connects over MTProto (via the local proxy) instead
+	// of the HTTP Bot API — so it works where api.telegram.org is blocked.
+	AppID   int32  `yaml:"app_id,omitempty" json:"app_id,omitempty"`
+	AppHash string `yaml:"app_hash,omitempty" json:"-"`
 	// Chats are the linked Telegram chats, keyed by chat_id.
 	Chats []LinkedChat `yaml:"chats,omitempty" json:"chats,omitempty"`
 }
@@ -120,9 +125,22 @@ func (s *Store) Snapshot() State {
 		BotToken:    s.state.BotToken,
 		BotUsername: s.state.BotUsername,
 		PrimaryLang: s.state.PrimaryLang,
+		AppID:       s.state.AppID,
+		AppHash:     s.state.AppHash,
 	}
 	out.Chats = append([]LinkedChat(nil), s.state.Chats...)
 	return out
+}
+
+// SetAppCredentials stores the my.telegram.org app_id/app_hash (or clears
+// them with 0/""), then persists. Empty credentials revert the bot to the
+// HTTP Bot API transport on next start.
+func (s *Store) SetAppCredentials(appID int32, appHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.AppID = appID
+	s.state.AppHash = strings.TrimSpace(appHash)
+	return s.saveLocked()
 }
 
 // SetBotToken stores a new token, clears the cached username (the

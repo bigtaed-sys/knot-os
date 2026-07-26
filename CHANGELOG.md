@@ -4,6 +4,12 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.9] — 2026-07-25
+
+### Added
+
+- **Telegram bot works when the Bot API is blocked (MTProto).** By default the notification bot uses the HTTP Bot API (`api.telegram.org`), which is blocked in some regions. Enter an **app_id + app_hash** (my.telegram.org) under System → Notifications and the bot instead speaks native **MTProto** via `gogram`, dialing Telegram **through the local Telegram proxy** (Censorship bypass page) — so it keeps delivering alerts and answering commands where the Bot API is unreachable. Opt-in and reversible: clear the credentials to go back to the Bot API. The bot's features (commands, inline keyboards, push alerts) are unchanged — only the transport differs.
+
 ## [2026.07.8-2] — 2026-07-25
 
 ### Changed

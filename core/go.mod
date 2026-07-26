@@ -5,6 +5,7 @@ go 1.25.0
 require github.com/go-chi/chi/v5 v5.2.5
 
 require (
+	github.com/amarnathcjd/gogram v1.7.71
 	github.com/fsnotify/fsnotify v1.10.0
 	github.com/miekg/dns v1.1.72
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e

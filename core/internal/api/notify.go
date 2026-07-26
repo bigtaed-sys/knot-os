@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/knot-os/knot-os/core/internal/notify"
+	"github.com/knot-os/knot-os/core/internal/tgproxy"
 )
 
 // MountNotify registers /notify/* under the auth-gated group.
@@ -28,6 +29,7 @@ func (s *Server) MountNotify(r chi.Router) {
 	}
 	r.Get("/notify/telegram", s.handleNotifyGet)
 	r.Put("/notify/telegram/token", s.handleNotifyPutToken)
+	r.Put("/notify/telegram/app", s.handleNotifyPutApp)
 	r.Post("/notify/telegram/restart", s.handleNotifyRestart)
 	r.Post("/notify/telegram/pin", s.handleNotifyIssuePIN)
 	r.Get("/notify/telegram/pin", s.handleNotifyPINStatus)
@@ -49,16 +51,62 @@ type notifyStateJSON struct {
 	BotUsername   string              `json:"bot_username,omitempty"`
 	PrimaryLang   string              `json:"primary_lang"`
 	Chats         []notify.LinkedChat `json:"chats"`
+	// MTProto transport: app_id/app_hash configured (app_hash never
+	// leaves the API), and whether the local Telegram proxy is on (so the
+	// UI can hint that the bot will dial through it).
+	AppConfigured bool  `json:"app_configured"`
+	AppID         int32 `json:"app_id,omitempty"`
+	ProxyEnabled  bool  `json:"proxy_enabled"`
 }
 
 func (s *Server) handleNotifyGet(w http.ResponseWriter, _ *http.Request) {
 	st := s.notify.Snapshot()
+	cfg := s.Snapshot()
 	writeJSON(w, http.StatusOK, notifyStateJSON{
 		BotConfigured: st.BotToken != "",
 		BotUsername:   st.BotUsername,
 		PrimaryLang:   st.PrimaryLang,
 		Chats:         st.Chats,
+		AppConfigured: st.AppID > 0 && st.AppHash != "",
+		AppID:         st.AppID,
+		ProxyEnabled:  cfg.Network.TGProxy != nil && cfg.Network.TGProxy.Enabled,
 	})
+}
+
+// handleNotifyPutApp sets/clears the MTProto app credentials and restarts
+// the bot so it switches transport.
+func (s *Server) handleNotifyPutApp(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AppID   int32  `json:"app_id"`
+		AppHash string `json:"app_hash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if err := s.notify.SetAppCredentials(body.AppID, body.AppHash); err != nil {
+		writeError(w, http.StatusInternalServerError, "save_failed", err.Error())
+		return
+	}
+	if s.notifyBot != nil {
+		// Refresh the proxy route from the current config before restart.
+		s.notifyBot.SetMTProxy(s.botMTProxyURL(), "/var/lib/knot/notify-mtproto.session")
+		if err := s.notifyBot.Restart(r.Context()); err != nil {
+			writeError(w, http.StatusBadRequest, "bot_start_failed", err.Error())
+			return
+		}
+	}
+	s.handleNotifyGet(w, r)
+}
+
+// botMTProxyURL builds the loopback tg:// proxy URL when the local
+// Telegram proxy is enabled, mirroring cmd/knotd.
+func (s *Server) botMTProxyURL() string {
+	t := s.Snapshot().Network.TGProxy
+	if t == nil || !t.Enabled || t.Secret == "" {
+		return ""
+	}
+	return tgproxy.TGLink(tgproxy.Settings{Port: t.Port, Secret: t.Secret, LinkIP: "127.0.0.1"})
 }
 
 type tokenRequest struct {

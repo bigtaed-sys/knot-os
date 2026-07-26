@@ -47,6 +47,51 @@
 	let notifyTokenInput = $state('');
 	let notifySaving = $state(false);
 	let notifyError = $state<string | null>(null);
+	// MTProto transport (app_id/app_hash) — lets the bot work where the
+	// HTTP Bot API is blocked, dialing through the local Telegram proxy.
+	let appIDInput = $state('');
+	let appHashInput = $state('');
+	let appSaving = $state(false);
+
+	async function saveNotifyApp() {
+		appSaving = true;
+		notifyError = null;
+		try {
+			notifyState = await apiPut<NotifyState>(
+				'/notify/telegram/app',
+				{ app_id: parseInt(appIDInput, 10) || 0, app_hash: appHashInput.trim() },
+				{ timeoutMs: 30000 }
+			);
+			appHashInput = '';
+		} catch (e) {
+			if (e instanceof ApiError) {
+				const b = e.body as { error?: { message?: string } } | undefined;
+				notifyError = b?.error?.message ?? e.message;
+			} else {
+				notifyError = e instanceof Error ? e.message : String(e);
+			}
+		} finally {
+			appSaving = false;
+		}
+	}
+
+	async function clearNotifyApp() {
+		appSaving = true;
+		notifyError = null;
+		try {
+			notifyState = await apiPut<NotifyState>(
+				'/notify/telegram/app',
+				{ app_id: 0, app_hash: '' },
+				{ timeoutMs: 30000 }
+			);
+			appIDInput = '';
+			appHashInput = '';
+		} catch (e) {
+			notifyError = e instanceof Error ? e.message : String(e);
+		} finally {
+			appSaving = false;
+		}
+	}
 	let notifyPIN = $state<NotifyPIN | null>(null);
 	let notifyPinTick = $state(0);
 
@@ -714,6 +759,49 @@
 						{/each}
 					</ul>
 				{/if}
+
+				<!-- MTProto transport: app_id/app_hash (works where the Bot
+				     API is blocked, dialing via the local Telegram proxy) -->
+				<div class="mt-5 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+					<div class="flex items-center gap-2 mb-1">
+						<span class="font-medium text-sm">{$_('notify.mtproto_title')}</span>
+						{#if notifyState.app_configured}
+							<span class="badge badge-ok text-[10px]">{$_('notify.mtproto_on')}</span>
+						{/if}
+					</div>
+					<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-3">
+						{$_('notify.mtproto_help')}
+						{#if !notifyState.proxy_enabled}
+							<span class="text-amber-600 dark:text-amber-400 block mt-1">
+								<i class="bi bi-exclamation-triangle"></i> {$_('notify.mtproto_no_proxy')}
+							</span>
+						{/if}
+					</p>
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						<input
+							class="input font-mono"
+							type="number"
+							bind:value={appIDInput}
+							placeholder={notifyState.app_configured ? String(notifyState.app_id) : 'app_id'}
+						/>
+						<input
+							class="input font-mono"
+							type="password"
+							bind:value={appHashInput}
+							placeholder={notifyState.app_configured ? '••••••••' : 'app_hash'}
+						/>
+					</div>
+					<div class="flex items-center gap-2 mt-3">
+						<button class="btn-ghost text-sm" type="button" disabled={appSaving} onclick={saveNotifyApp}>
+							{#if appSaving}<span class="spinner"></span>{/if}{$_('notify.mtproto_save')}
+						</button>
+						{#if notifyState.app_configured}
+							<button class="btn-ghost text-sm text-rose-600 dark:text-rose-400" type="button" disabled={appSaving} onclick={clearNotifyApp}>
+								{$_('notify.mtproto_clear')}
+							</button>
+						{/if}
+					</div>
+				</div>
 			{/if}
 
 			{#if notifyError}

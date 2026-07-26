@@ -198,6 +198,18 @@ type liveWANIfaceProvider interface {
 	LiveModemIface() string
 }
 
+// botMTProxyURL returns a tg:// proxy link pointing at the local
+// Telegram proxy (on loopback) when it's enabled, so the MTProto bot can
+// dial Telegram through the bypass. Empty when the proxy is off (the bot
+// then connects directly — only works where Telegram isn't blocked).
+func botMTProxyURL(cfg config.Config) string {
+	t := cfg.Network.TGProxy
+	if t == nil || !t.Enabled || t.Secret == "" {
+		return ""
+	}
+	return tgproxy.TGLink(tgproxy.Settings{Port: t.Port, Secret: t.Secret, LinkIP: "127.0.0.1"})
+}
+
 func zapretEgressIface(cfg config.Config, backend network.Backend) string {
 	switch cfg.Role {
 	case config.RoleWiFiRouter:
@@ -1202,6 +1214,10 @@ func main() {
 		}
 
 		apiSrv.SetNotifyServices(notifyStore, bot)
+		// MTProto transport: when the bot has app_id/app_hash, dial
+		// Telegram through the local proxy (if enabled) so it works where
+		// the HTTP Bot API is blocked.
+		bot.SetMTProxy(botMTProxyURL(cfg), "/var/lib/knot/notify-mtproto.session")
 		if err := bot.Start(ctx); err != nil {
 			logger.Printf("notify: bot start: %v (bot disabled, fix the token in System → Notifications)", err)
 		}

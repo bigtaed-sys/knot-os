@@ -280,6 +280,9 @@ export interface NotifyState {
 	bot_username?: string;
 	primary_lang: 'ru' | 'en' | string;
 	chats: NotifyLinkedChat[];
+	app_configured?: boolean;
+	app_id?: number;
+	proxy_enabled?: boolean;
 }
 
 export interface NotifyPIN {
