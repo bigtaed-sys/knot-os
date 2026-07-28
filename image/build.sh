@@ -648,10 +648,10 @@ if [[ "$mbr_part2_end" != "$img_bytes" ]]; then
 fi
 echo "    .img size: $((img_bytes / 1024 / 1024)) MiB ($img_bytes bytes), part2 ends at $mbr_part2_end"
 
-# Wipe any old .img.xz from previous builds so the deploy/ dir only
-# ever has the most recent artifact - keeps the Windows-side rsync
-# back-copy from accumulating stale images.
-rm -f "$DEPLOY_DIR"/*.img.xz
+# Wipe any old .img.xz (and stale .partial) from previous builds so the
+# deploy/ dir only ever has the most recent artifact - keeps the
+# Windows-side rsync back-copy from accumulating stale images.
+rm -f "$DEPLOY_DIR"/*.img.xz "$DEPLOY_DIR"/*.img.xz.partial
 
 TS="$(date +%Y%m%d-%H%M)"
 # Generic arm64 image — the base is Raspberry Pi OS Lite arm64, which
@@ -660,7 +660,40 @@ TS="$(date +%Y%m%d-%H%M)"
 # target); nothing parses it — the copy-back step globs *.img.xz.
 OUT="$DEPLOY_DIR/${TS}-KnotOS-pi-arm64-${VERSION}.img.xz"
 echo "    compressing -> $OUT (this takes a few minutes)"
-xz -T0 -c "$WORK_IMG" > "$OUT"
+
+# The mount/chroot/`cp base -> work` steps just filled the page cache
+# with gigabytes. On a memory-capped VM (WSL2 especially) that cache
+# plus xz's own multi-threaded buffers can tip the box into the OOM
+# killer, which SIGKILLs xz mid-compress with no error message. That's
+# the "fails only inside the full build, but a standalone xz on the same
+# .img works" symptom. Two guards:
+#   1. Drop the page cache so xz starts with headroom.
+#   2. Cap xz's memory with --memlimit-compress so it self-tunes its
+#      thread count/settings down to fit instead of being killed.
+sync
+echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+
+# Compress to a .partial first and promote it to the final name only on
+# success, so an interrupted xz never leaves a truncated 0-byte file
+# that looks like a finished image. -e is lifted so we can report the
+# real exit code instead of a bare "Build failed" from the PowerShell
+# wrapper. -v prints the ratio (and any error) to the console.
+PARTIAL="$OUT.partial"
+set +e
+xz -T0 --memlimit-compress=40% -v -c "$WORK_IMG" > "$PARTIAL"
+xz_rc=$?
+set -e
+if [[ $xz_rc -ne 0 ]]; then
+    echo "fatal: xz failed (exit $xz_rc) — no image was produced." >&2
+    case "$xz_rc" in
+        137) echo "       exit 137 = killed (SIGKILL), almost always the OOM killer." >&2 ;;
+        143) echo "       exit 143 = terminated (SIGTERM) — console closed or host slept mid-compress." >&2 ;;
+        *)   echo "       Check the xz output above; common causes are a killed process or a full disk." >&2 ;;
+    esac
+    rm -f "$PARTIAL"
+    exit "$xz_rc"
+fi
+mv "$PARTIAL" "$OUT"
 
 # Drop intermediate work to free disk; keep the cache.
 rm -f "$WORK_IMG"
