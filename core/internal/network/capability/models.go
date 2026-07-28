@@ -29,18 +29,25 @@ var knownUSBEth = []knownAdapter{
 	{Vendor: "0b95", Product: "7720", Label: "ASIX AX88772 (USB 2.0 Fast Ethernet)"},
 }
 
-// describeAdapter returns the display label for a USB-Ethernet
-// adapter, preferring the known-models table; falling back to
-// "USB Ethernet (<driver>)" when the driver is known, or the
-// terse "USB Ethernet" when nothing is.
-func describeAdapter(vendor, product, driver string) string {
-	for _, k := range knownUSBEth {
-		if k.Vendor == vendor && k.Product == product {
-			return k.Label
+// describeAdapter returns the display label for an Ethernet port.
+// A USB dongle prefers the known-models table, then falls back to
+// "USB Ethernet (<driver>)" / "USB Ethernet". An onboard NIC (usb
+// false) is labelled "Onboard Ethernet (<driver>)" / "Onboard
+// Ethernet" — the USB-ID table never applies to it.
+func describeAdapter(vendor, product, driver string, usb bool) string {
+	if usb {
+		for _, k := range knownUSBEth {
+			if k.Vendor == vendor && k.Product == product {
+				return k.Label
+			}
 		}
 	}
-	if driver != "" {
-		return "USB Ethernet (" + driver + ")"
+	kind := "USB Ethernet"
+	if !usb {
+		kind = "Onboard Ethernet"
 	}
-	return "USB Ethernet"
+	if driver != "" {
+		return kind + " (" + driver + ")"
+	}
+	return kind
 }

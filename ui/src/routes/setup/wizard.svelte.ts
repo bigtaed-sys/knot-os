@@ -69,6 +69,9 @@ class WizardStore {
 
 	// Step-3 connection — router WAN.
 	wanInterface = $state('');
+	// Extra wired Ethernet ports switched into the LAN (router role,
+	// Ethernet WAN only). Empty = Wi-Fi-only LAN.
+	lanPorts = $state<string[]>([]);
 	wanMode = $state<'dhcp' | 'pppoe' | 'modem'>('dhcp');
 	wanPppoeUser = $state('');
 	wanPppoePass = $state('');
@@ -131,6 +134,7 @@ class WizardStore {
 					role: this.role,
 					uplinkSSID: this.uplinkSSID,
 					wanInterface: this.wanInterface,
+					lanPorts: this.lanPorts,
 					wanMode: this.wanMode,
 					wanApn: this.wanApn,
 					wanModemUser: this.wanModemUser,
@@ -157,6 +161,7 @@ class WizardStore {
 			if (j.role) this.role = j.role;
 			if (typeof j.uplinkSSID === 'string') this.uplinkSSID = j.uplinkSSID;
 			if (typeof j.wanInterface === 'string') this.wanInterface = j.wanInterface;
+			if (Array.isArray(j.lanPorts)) this.lanPorts = j.lanPorts.filter((p: unknown) => typeof p === 'string');
 			if (j.wanMode) this.wanMode = j.wanMode;
 			if (typeof j.wanApn === 'string') this.wanApn = j.wanApn;
 			if (typeof j.wanModemUser === 'string') this.wanModemUser = j.wanModemUser;

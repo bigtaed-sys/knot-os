@@ -14,20 +14,24 @@
 		plugins = [],
 		version = '',
 		modemActive = false,
+		routerActive = false,
 		open = $bindable(false)
 	}: {
 		plugins?: Plugin[];
 		version?: string;
 		modemActive?: boolean;
+		routerActive?: boolean;
 		open?: boolean;
 	} = $props();
 
 	// Messages (SMS) only makes sense with a cellular modem as the WAN;
-	// hide it otherwise.
+	// the Network/Ports page only with a wired WAN (wifi-router role).
+	// Hide each otherwise.
 	const coreItems = $derived(
 		[
 			{ path: '/', icon: 'bi-speedometer2', label: 'nav.dashboard' },
 			{ path: '/devices', icon: 'bi-hdd-network', label: 'nav.devices' },
+			{ path: '/network', icon: 'bi-ethernet', label: 'nav.network', routerOnly: true },
 			{ path: '/profiles', icon: 'bi-shield-check', label: 'nav.profiles' },
 			{ path: '/protection', icon: 'bi-shield-fill-check', label: 'nav.protection' },
 			{ path: '/routing', icon: 'bi-globe-americas', label: 'nav.routing' },
@@ -39,7 +43,9 @@
 			{ path: '/guests', icon: 'bi-people', label: 'nav.guests' },
 			{ path: '/plugins', icon: 'bi-puzzle', label: 'nav.plugins' },
 			{ path: '/system', icon: 'bi-gear', label: 'nav.system' }
-		].filter((it) => !('modemOnly' in it && it.modemOnly) || modemActive)
+		]
+			.filter((it) => !('modemOnly' in it && it.modemOnly) || modemActive)
+			.filter((it) => !('routerOnly' in it && it.routerOnly) || routerActive)
 	);
 
 	function isActive(itemPath: string, currentPath: string): boolean {

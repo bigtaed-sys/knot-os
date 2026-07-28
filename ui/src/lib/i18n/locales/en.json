@@ -23,6 +23,23 @@
 		"theme_dark": "Dark theme",
 		"language": "Language"
 	},
+	"network": {
+		"title": "Network & ports",
+		"subtitle": "Choose which Ethernet port receives the internet (WAN) and which hand it out over a cable (LAN).",
+		"not_router": "Port assignment is only available in full router mode.",
+		"no_ports": "No Ethernet ports detected.",
+		"wan_label": "Internet port (WAN)",
+		"wan_help": "The single port with the internet cable from your ISP or upstream router.",
+		"lan_label": "Local ports (LAN)",
+		"lan_help": "Ports that hand out internet over a cable. Bridged with Wi-Fi into one network.",
+		"usb": "USB",
+		"onboard": "Onboard",
+		"link": "Cable",
+		"applying": "Applying…",
+		"save": "Save & apply",
+		"saved": "Saved",
+		"reapply_warn": "Applying rebuilds the network — Wi-Fi clients briefly reconnect."
+	},
 	"profiles": {
 		"title": "Profiles",
 		"subtitle": "Schedules and DNS filters that get assigned to devices",
@@ -265,6 +282,9 @@
 			"modem_none": "No modem detected yet. Plug in a USB LTE modem — you can still finish setup and it'll connect once present.",
 			"wan_iface_label": "WAN port",
 			"no_cable": "No Ethernet cable plugged in. Connect one and step back / forward to refresh.",
+			"lan_ports_label": "Wired LAN ports",
+			"lan_ports_help": "Tick the ports that should hand out internet over a cable. They are bridged with Wi-Fi into one network.",
+			"lan_port_on": "LAN",
 			"wan_mode_label": "Connection type",
 			"dhcp": "DHCP (automatic)",
 			"dhcp_desc": "Most common — try this first",

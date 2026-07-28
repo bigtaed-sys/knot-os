@@ -22,11 +22,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Default the version to the current git tag (e.g. v2026.07.9 → 2026.07.9)
-# so a locally-built image reports the real version, not a stale constant.
-# Override by exporting VERSION before running.
-VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null | sed 's/^v//')}"
-VERSION="${VERSION:-2026.05.1-dev}"
+# The version stamped into the binary. Normally injected by the caller:
+#   - image/build.ps1 derives it from `git describe` on the Windows side
+#     (the WSL build dir has no .git, so we can't read the tag here), and
+#   - release.yml passes the release tag.
+# The constant below is only a last-resort fallback for a bare
+# `sudo bash image/build.sh` run with no VERSION exported.
+VERSION="${VERSION:-0.0.0-dev}"
 LITE_URL="${LITE_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
 QEMU_BIN="${QEMU_BIN:-/usr/bin/qemu-aarch64-static}"
 

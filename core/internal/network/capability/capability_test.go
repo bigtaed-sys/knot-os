@@ -236,7 +236,13 @@ func TestProbeAcceptsUSBIDOnly(t *testing.T) {
 	}
 }
 
-func TestProbeSkipsNonUSBNetdev(t *testing.T) {
+// TestProbeIncludesOnboardEth guards the Pi 4/5 fix: the onboard
+// bcmgenet NIC sits on the SoC platform bus (no "usb" in the path,
+// no PRODUCT= in uevent) and MUST still be reported — as a non-USB
+// "Onboard Ethernet" port — so the wizard can offer it as the WAN.
+// Regression this catches: the old probe only accepted USB adapters,
+// so Pi 4B booted with "no Ethernet detected" on a cabled port.
+func TestProbeIncludesOnboardEth(t *testing.T) {
 	sysClassNet := makeFakeSysfs(t, map[string]struct {
 		uevent, devPath string
 	}{
@@ -249,8 +255,66 @@ func TestProbeSkipsNonUSBNetdev(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Eth) != 0 || rep.RouterCapable {
-		t.Errorf("expected no USB-Eth; got %+v", rep.Eth)
+	if len(rep.Eth) != 1 || !rep.RouterCapable {
+		t.Fatalf("onboard eth should be reported: %+v", rep.Eth)
+	}
+	got := rep.Eth[0]
+	if got.Interface != "eth0" || got.USB {
+		t.Errorf("onboard eth0 should have USB=false: %+v", got)
+	}
+	if got.Model != "Onboard Ethernet (bcmgenet)" {
+		t.Errorf("onboard model=%q, want %q", got.Model, "Onboard Ethernet (bcmgenet)")
+	}
+}
+
+// TestProbeExcludesWireless makes sure a Wi-Fi netdev is never
+// mistaken for a wired port even if it isn't named "wlan*": the
+// phy80211 symlink is the signal.
+func TestProbeExcludesWireless(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink-heavy test, skip on Windows")
+	}
+	sysClassNet := makeFakeSysfs(t, map[string]struct {
+		uevent, devPath string
+	}{
+		"eth0": { // real wired port
+			uevent:  "DRIVER=bcmgenet\n",
+			devPath: "devices/platform/soc/fd580000.genet/net/eth0",
+		},
+		"wlp1s0": { // wireless despite non-wlan name
+			uevent:  "DRIVER=brcmfmac\n",
+			devPath: "devices/platform/soc/fe300000.mmc/wifi",
+		},
+	})
+	// Mark wlp1s0 as wireless with a phy80211 symlink.
+	if err := os.Symlink(filepath.Join(sysClassNet, "..", "..", "ieee80211", "phy0"),
+		filepath.Join(sysClassNet, "wlp1s0", "phy80211")); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Probe{SysClassNet: sysClassNet, ModelFile: "/nonexistent"}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Eth) != 1 || rep.Eth[0].Interface != "eth0" {
+		t.Errorf("wireless netdev must be excluded; got %+v", rep.Eth)
+	}
+}
+
+// TestProbeExcludesWWAN pins that a cellular data netdev (wwan0) is
+// filtered out by name — it's the modem's WAN, not an assignable port.
+func TestProbeExcludesWWAN(t *testing.T) {
+	sysClassNet := makeFakeSysfs(t, map[string]struct {
+		uevent, devPath string
+	}{
+		"eth0":  {uevent: "DRIVER=bcmgenet\n", devPath: "devices/platform/soc/fd580000.genet/net/eth0"},
+		"wwan0": {uevent: "DRIVER=cdc_mbim\nPRODUCT=2c7c/0125/318\n", devPath: "devices/platform/soc/usb1/1-1/1-1:1.4"},
+	})
+	rep, err := Probe{SysClassNet: sysClassNet, ModelFile: "/nonexistent"}.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Eth) != 1 || rep.Eth[0].Interface != "eth0" {
+		t.Errorf("wwan0 must be excluded; got %+v", rep.Eth)
 	}
 }
 

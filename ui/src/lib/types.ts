@@ -23,6 +23,20 @@ export interface CapabilityReport {
 	router_capable: boolean;
 }
 
+// PortView is one Ethernet port plus its role under the active config
+// ("wan" | "lan" | "unused"), as returned by GET /network/ports.
+export interface PortView extends EthAdapter {
+	role: 'wan' | 'lan' | 'unused';
+}
+
+export interface NetworkPortsResponse {
+	pi_model_string?: string;
+	ports: PortView[];
+	wan_interface: string;
+	lan_ports: string[];
+	router_mode: boolean;
+}
+
 export interface UplinkStatus {
 	ssid: string;
 	connected: boolean;

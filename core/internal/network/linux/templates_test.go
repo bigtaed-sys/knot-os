@@ -58,6 +58,25 @@ func TestHostapdDefaultsChannel(t *testing.T) {
 	}
 }
 
+func TestHostapdBridge(t *testing.T) {
+	// With Bridge set, hostapd must be told to enslave its AP interface
+	// into the LAN bridge; without it, no bridge= line appears.
+	withBr := BuildHostapdConf(HostapdParams{
+		Interface: "wlan0", Bridge: "br-lan", SSID: "x", Country: "RU", PSK: "secret12",
+	})
+	mustContain(t, withBr, "interface=wlan0", "bridge=br-lan")
+	// bridge= must come before the driver line (hostapd is order-tolerant
+	// but we keep it adjacent to interface= for readability).
+	if i, j := strings.Index(withBr, "bridge=br-lan"), strings.Index(withBr, "driver=nl80211"); i < 0 || i > j {
+		t.Errorf("bridge= should appear right after interface=, got:\n%s", withBr)
+	}
+
+	noBr := BuildHostapdConf(HostapdParams{Interface: "wlan0", SSID: "x", Country: "RU"})
+	if strings.Contains(noBr, "bridge=") {
+		t.Errorf("no bridge should emit no bridge= line, got:\n%s", noBr)
+	}
+}
+
 func TestWpaSupplicantSecured(t *testing.T) {
 	out := BuildWpaSupplicantConf(WpaSupplicantParams{
 		Country: "RU",

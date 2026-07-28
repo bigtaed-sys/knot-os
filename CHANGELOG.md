@@ -4,11 +4,22 @@ All notable changes to KnotOS are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Starting with v2026.05.1 the project switches to **CalVer** (`v<year>.<month>.<release>[-<patch>]`) — semver no longer fits a routinely-deployed appliance whose user-visible "version" is mostly the date the image was built.
 
+## [2026.07.10] — 2026-07-28
+
+### Added
+
+- **Ethernet port management (`Network & ports`).** A new page (wifi-router role) lets you assign which Ethernet port carries the internet (**WAN**) and switch the remaining ports into the **LAN** — the wired ports are bridged with Wi-Fi into one network, turning the box into a small switch. The first-run wizard's connection step gained the same assignment when more than one cabled port is present. Backed by `GET`/`PUT /api/network/ports` and a new `network.lan_ports` config field; single-NIC setups are unaffected (no bridge, no behaviour change). _Wired-LAN bridging needs on-device validation._
+
+### Fixed
+
+- **Onboard Ethernet is detected on Pi 4/5.** The hardware probe only recognised **USB** Ethernet, so the Pi 4B/5 built-in port (on the SoC `bcmgenet` MAC, not the USB bus) was invisible — the wizard reported "no Ethernet" on a cabled port and wouldn't offer full-router mode. It now reports every physical Ethernet port, onboard or USB, labelling each accordingly; wireless (`wlan*`/phy80211) and cellular (`wwan*`) netdevs stay excluded.
+- **Setup wizard keeps the detected Pi model on a transient probe hiccup.** A timed-out `/setup/capability` call (flaky setup-AP link or the server's 5 s sysfs deadline) blanked the report, so the model flickered to "couldn't detect". The last-known result is now retained on error, showing only a retry hint.
+- **Image build no longer aborts on the version step; local images report the real version.** The `2026.07.9-1` change ran `git describe` inside `image/build.sh`, but the WSL build dir has no `.git`, so under `set -euo pipefail` that failed pipe aborted the whole build before step 1. Version derivation moved to `image/build.ps1` (Windows side, where `.git` exists) and is passed through as `$VERSION`; `build.sh` keeps a plain fallback. Also removed stale "pi-gen" wording from the build scripts (the build modifies a ready Pi OS Lite image and never ran pi-gen).
+
 ## [2026.07.9-1] — 2026-07-25
 
 ### Fixed
 
-- **Locally-built images report the real version.** `image/build.sh` defaulted `VERSION` to a stale `2026.05.1-dev` when not set; it now derives it from the current git tag (`git describe`), so an image built from a checkout shows its actual version. (Override by exporting `VERSION`.)
 - **System → More tab: use a text input for app_id.** The MTProto app_id field bound a string to a `type="number"` input; switched to `type="text"` + `inputmode="numeric"` to avoid a Svelte binding mismatch.
 
 ## [2026.07.9] — 2026-07-25

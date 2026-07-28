@@ -208,7 +208,7 @@ func (b *LinuxBackend) reconnectModemWAN(ctx context.Context) {
 	}
 	rules := BuildNftablesRouter(RouterNftablesParams{
 		WANInterface:   iface,
-		LANInterface:   IfaceWlan,
+		LANInterface:   routerLANIface(),
 		LANCIDR:        lan.CIDR,
 		GuestInterface: guestNftIface(guestBSS),
 		GuestCIDR:      guestNftCIDR(guestBSS),

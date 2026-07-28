@@ -44,6 +44,10 @@
 					? { modem: { apn: wizard.wanApn, pin: wizard.wanPin, username: wizard.wanModemUser } }
 					: {})
 			};
+			// Wired LAN ports only apply to an Ethernet WAN.
+			if (wizard.wanMode !== 'modem' && wizard.lanPorts.length > 0) {
+				body.lan_ports = wizard.lanPorts.filter((p) => p !== wizard.wanInterface);
+			}
 		} else {
 			body.uplink = { ssid: wizard.uplinkSSID, psk: wizard.uplinkPSK };
 		}

@@ -65,6 +65,13 @@ type Network struct {
 	// WAN is the upstream interface for the wifi-router role.
 	// Empty in setup and extender roles.
 	WAN *WAN `yaml:"wan,omitempty" json:"wan,omitempty"`
+	// LANPorts lists extra wired Ethernet interfaces bridged into the
+	// LAN in the wifi-router role, turning the box into a small switch:
+	// each listed port shares the Wi-Fi LAN's subnet + DHCP. Empty (the
+	// common single-NIC case) keeps the Wi-Fi-only LAN with no bridge.
+	// Honoured only in wifi-router mode; must not include the WAN
+	// interface. Kernel netdev names (e.g. "eth1"), same as WAN.
+	LANPorts []string `yaml:"lan_ports,omitempty" json:"lan_ports,omitempty"`
 	// DNS controls how the resolver forwards queries upstream.
 	// Empty/nil keeps the v0.3 default of plain UDP to 1.1.1.1 +
 	// 8.8.8.8.

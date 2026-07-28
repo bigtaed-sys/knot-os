@@ -178,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 		s.MountApply(r)
 		s.MountBandwidth(r)
 		s.MountPortForwards(r)
+		s.MountNetwork(r)
 		s.MountZapret(r)
 		s.MountTGProxy(r)
 		s.MountModem(r)

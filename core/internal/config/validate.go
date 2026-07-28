@@ -155,10 +155,46 @@ func (n Network) validateRouter() error {
 	if ip := net.ParseIP(n.LAN.DHCP.PoolEnd); ip == nil {
 		return fmt.Errorf("lan.dhcp.pool_end: invalid IP %q", n.LAN.DHCP.PoolEnd)
 	}
+	if err := n.validateLANPorts(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ifaceNameRE is a permissive Linux netdev-name check (kernel allows up
+// to 15 chars; we accept letters, digits, and the usual separators).
+var ifaceNameRE = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,15}$`)
+
+// validateLANPorts checks the wired-LAN bridge members: each must be a
+// plausible interface name, distinct, and not the WAN interface (a port
+// can't be both the uplink and a LAN member). Only called for the
+// wifi-router role — the extender/setup roles reject a non-empty list
+// via Validate.
+func (n Network) validateLANPorts() error {
+	seen := map[string]bool{}
+	wan := ""
+	if n.WAN != nil {
+		wan = n.WAN.Interface
+	}
+	for i, p := range n.LANPorts {
+		if !ifaceNameRE.MatchString(p) {
+			return fmt.Errorf("lan_ports[%d]: %q is not a valid interface name", i, p)
+		}
+		if wan != "" && p == wan {
+			return fmt.Errorf("lan_ports[%d]: %q is also the WAN interface", i, p)
+		}
+		if seen[p] {
+			return fmt.Errorf("lan_ports[%d]: duplicate interface %q", i, p)
+		}
+		seen[p] = true
+	}
 	return nil
 }
 
 func (n Network) validateExtender() error {
+	if len(n.LANPorts) > 0 {
+		return fmt.Errorf("lan_ports is only supported in the wifi-router role")
+	}
 	if n.Uplink == nil || n.Uplink.SSID == "" {
 		return fmt.Errorf("uplink.ssid is required for wifi-extender role")
 	}

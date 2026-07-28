@@ -33,7 +33,13 @@
 			wizard.cap = fresh;
 		} catch (e) {
 			if (!silent) {
-				wizard.cap = { pi: '', eth: [], guest_ap_capable: false, router_capable: false };
+				// Surface the error, but DON'T wipe a previously-good
+				// report. The probe call can time out on the flaky
+				// setup-AP link or hit the server's 5s sysfs deadline;
+				// blanking here made the detected Pi model (and the
+				// Ethernet list) flicker to "unknown" on every hiccup.
+				// Keeping the last-known cap means a transient failure
+				// shows the retry hint without losing what we saw.
 				if (e instanceof ApiTimeoutError) {
 					wizard.capError = $_('setup.detect_timeout');
 				} else if (e instanceof Error) {

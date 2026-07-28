@@ -195,6 +195,10 @@ type completeRequest struct {
 			Username string `json:"username"`
 		} `json:"modem,omitempty"`
 	} `json:"wan"`
+
+	// LANPorts are extra wired Ethernet interfaces to switch into the
+	// LAN (wifi-router role only). Ignored for modem WAN and extender.
+	LANPorts []string `json:"lan_ports,omitempty"`
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
@@ -259,6 +263,16 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 				APN:      req.WAN.Modem.APN,
 				PIN:      req.WAN.Modem.PIN,
 				Username: req.WAN.Modem.Username,
+			}
+		}
+		// Wired LAN ports only make sense with an Ethernet WAN (a modem
+		// WAN has no sibling ports to switch). Filter out the WAN itself
+		// defensively; Validate rejects the overlap anyway.
+		if mode != "modem" {
+			for _, p := range req.LANPorts {
+				if p != "" && p != req.WAN.Interface {
+					finished.Network.LANPorts = append(finished.Network.LANPorts, p)
+				}
 			}
 		}
 	default:

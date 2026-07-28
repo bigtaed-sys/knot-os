@@ -10,6 +10,18 @@ import (
 	"github.com/knot-os/knot-os/core/internal/config"
 )
 
+// routerLANIface returns the LAN-side interface name for nft/dnsmasq
+// in the wifi-router role: the LAN bridge when it exists (i.e. the
+// user assigned wired LAN ports and applyRouter built it), else the
+// bare Wi-Fi interface. Bridge presence is the ground truth, so this
+// stays correct for out-of-band refreshers like the modem watchdog.
+func routerLANIface() string {
+	if interfaceExists(IfaceBrLAN) {
+		return IfaceBrLAN
+	}
+	return IfaceWlan
+}
+
 // guestNftIface returns the guest interface name for nftables, or
 // "" when no guest BSS is active. Centralised so the apply paths
 // don't have to nil-check inline.
@@ -188,11 +200,48 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 		wan = "knot-nowan"
 	}
 
-	// 3. wlan0 LAN side. Same gateway-on-the-LAN-CIDR pattern as
-	//    extender, but the AP runs straight on wlan0 (no ap0).
-	if err := b.addrAdd(ctx, IfaceWlan, gw+"/"+cidrPrefix(lan.CIDR)); err != nil {
-		return fmt.Errorf("applyRouter: assign %s to %s: %w", gw, IfaceWlan, err)
+	// 3. LAN side. By default the AP runs straight on wlan0 and the
+	//    gateway IP sits there. When the user has assigned wired
+	//    Ethernet ports as LAN, we instead build a bridge (br-lan)
+	//    that fuses wlan0 + those ports into one L2 segment sharing
+	//    the LAN subnet + DHCP — the box becomes a small switch. The
+	//    gateway IP then lives on the bridge; hostapd enslaves wlan0
+	//    via its bridge= directive; the wired ports we enslave here.
+	lanIface := IfaceWlan
+	var lanPorts []string
+	for _, p := range cfg.Network.LANPorts {
+		if p == "" || p == cfg.Network.WAN.Interface {
+			continue // defensive — Validate already rejects these
+		}
+		if !interfaceExists(p) {
+			b.logger.Printf("applyRouter: LAN port %q not present — skipping", p)
+			continue
+		}
+		lanPorts = append(lanPorts, p)
 	}
+	if len(lanPorts) > 0 {
+		lanIface = IfaceBrLAN
+		if err := b.ensureBridge(ctx, IfaceBrLAN); err != nil {
+			return fmt.Errorf("applyRouter: %w", err)
+		}
+		for _, p := range lanPorts {
+			if err := b.enslaveToBridge(ctx, IfaceBrLAN, p); err != nil {
+				// Non-fatal: a flaky port shouldn't sink the whole LAN.
+				b.logger.Printf("applyRouter: %v (continuing)", err)
+			}
+		}
+	} else {
+		// No wired LAN — tear down any bridge a previous apply left so
+		// wlan0 owns the gateway IP directly again.
+		b.removeBridge(ctx, IfaceBrLAN)
+	}
+
+	b.addrFlush(ctx, lanIface)
+	if err := b.addrAdd(ctx, lanIface, gw+"/"+cidrPrefix(lan.CIDR)); err != nil {
+		return fmt.Errorf("applyRouter: assign %s to %s: %w", gw, lanIface, err)
+	}
+	// wlan0 must be up for hostapd regardless of bridging; the bridge
+	// (when used) is already up from ensureBridge.
 	if err := b.linkUp(ctx, IfaceWlan); err != nil {
 		return fmt.Errorf("applyRouter: bring %s up: %w", IfaceWlan, err)
 	}
@@ -220,8 +269,13 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	// 5. hostapd on wlan0 with the user-picked channel. Channel 0 means
 	//    "auto"; BuildHostapdConf falls back to channel 6. Guest BSS,
 	//    when set, is appended as a second [bss=ap_guest] section.
+	hostapdBridge := ""
+	if lanIface == IfaceBrLAN {
+		hostapdBridge = IfaceBrLAN
+	}
 	hostapdConf := BuildHostapdConf(HostapdParams{
 		Interface: IfaceWlan,
+		Bridge:    hostapdBridge,
 		SSID:      cfg.Network.AP.SSID,
 		Country:   effectiveCountry(cfg.Device.Country),
 		Channel:   cfg.Network.AP.Channel,
@@ -257,7 +311,7 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	//    second `dhcp-range=<iface>,...` line; dnsmasq picks the
 	//    interface based on the DHCP request's source.
 	dnsmasqConf := BuildDnsmasqConf(DnsmasqParams{
-		Interface:       IfaceWlan,
+		Interface:       lanIface,
 		ListenIP:        gw,
 		DHCPPoolStart:   lan.DHCP.PoolStart,
 		DHCPPoolEnd:     lan.DHCP.PoolEnd,
@@ -284,7 +338,7 @@ func (b *LinuxBackend) applyRouter(ctx context.Context, cfg config.Config) error
 	}
 	rules := BuildNftablesRouter(RouterNftablesParams{
 		WANInterface:   wan,
-		LANInterface:   IfaceWlan,
+		LANInterface:   lanIface,
 		LANCIDR:        lan.CIDR,
 		GuestInterface: guestNftIface(guestBSS),
 		GuestCIDR:      guestNftCIDR(guestBSS),

@@ -1,11 +1,12 @@
 # Build a flashable KnotOS image from Windows via WSL2.
 #
-# pi-gen needs Linux + root + chroot + loop devices. None of that
-# works directly on Windows. This script:
+# The image is built by modifying the official Raspberry Pi OS Lite arm64
+# image (losetup + mount + chroot); that needs Linux + root + loop
+# devices, none of which work directly on Windows. This script:
 #   1. Verifies WSL2 is installed and a usable distro exists.
 #   2. Syncs the repo into WSL's native filesystem (~/.knot-os-build/),
-#      because pi-gen breaks on /mnt/* mounts (9P does not support
-#      every operation pi-gen needs - chmod g+s, mknod, etc.).
+#      because the chroot/loop steps break on /mnt/* mounts (9P does not
+#      support every operation they need - chmod g+s, mknod, etc.).
 #   3. Runs `sudo bash image/build.sh` inside WSL.
 #   4. Copies the produced .img.xz back to image/deploy/ on Windows.
 #
@@ -65,7 +66,7 @@ $distros = $rawList |
 if ($distros.Count -eq 0) {
     Write-Host ''
     Write-Host 'No usable WSL distro found.' -ForegroundColor Red
-    Write-Host 'docker-desktop alone will not work - pi-gen needs a real distro (Ubuntu 22.04+ recommended).'
+    Write-Host 'docker-desktop alone will not work - the image build needs a real distro (Ubuntu 22.04+ recommended).'
     Write-Host 'Install one with:'
     Write-Host '    wsl --install -d Ubuntu' -ForegroundColor Yellow
     exit 1
@@ -104,6 +105,19 @@ elseif ($distros -notcontains $Distro) {
 }
 
 Write-Host "Using WSL distro: $Distro"
+
+# Derive the image version from git on the Windows side. The build dir
+# synced into WSL excludes .git/, so build.sh can't read the tag itself -
+# we compute it here and pass it through as $VERSION. Strip the leading
+# 'v' (v2026.07.9 -> 2026.07.9). Falls back to a dev marker outside a
+# git checkout.
+$imgVersion = ''
+try {
+    $desc = (& git -C $repoRoot describe --tags --always 2>$null | Out-String).Trim()
+    if ($desc) { $imgVersion = ($desc -replace '^v', '') }
+} catch { }
+if (-not $imgVersion) { $imgVersion = '0.0.0-dev' }
+Write-Host "Image version: $imgVersion"
 
 function wsl-run([string]$cmd) {
     # -e bash -lc "..."   keeps argument parsing predictable across distros.
@@ -220,8 +234,8 @@ $dst   = "/home/$linuxUser/.knot-os-build/"
 
 if ($Clean) {
     Write-Host "Cleaning $dst (WSL)..."
-    # pi-gen runs as root and leaves root-owned files (work/, deploy/)
-    # all over the build dir. The user-level wsl-run can't delete
+    # build.sh runs as root and leaves root-owned files (work/, deploy/,
+    # cache/) all over the build dir. The user-level wsl-run can't delete
     # them; use root explicitly.
     & wsl.exe -d $Distro -u root -e bash -lc "rm -rf '$dst'"
     if ($LASTEXITCODE -ne 0) { throw "clean failed" }
@@ -231,7 +245,7 @@ Write-Host "Syncing source: $src -> $dst (WSL)"
 # Excludes are split into two categories:
 #   - Editor/IDE noise we never want to sync (.git, node_modules, ...)
 #   - Build outputs that end up root-owned in WSL (cache, staged
-#     binaries/plugins, pi-gen tree, deploy/). Without excluding these,
+#     binaries/plugins, work/deploy/). Without excluding these,
 #     a second sync as the unprivileged user fails with EACCES trying
 #     to --delete root-owned files left by the previous build.
 $rsyncCmd = "mkdir -p '$dst' && rsync -a --delete " +
@@ -242,7 +256,6 @@ $rsyncCmd = "mkdir -p '$dst' && rsync -a --delete " +
     "--exclude='dist/' " +
     "--exclude='tmp/' " +
     "--exclude='core/internal/web/dist/' " +
-    "--exclude='image/pi-gen/' " +
     "--exclude='image/deploy/' " +
     "--exclude='image/work/' " +
     "--exclude='image/cache/' " +
@@ -263,12 +276,13 @@ wsl-run-as-user $rsyncCmd
 # ---- 5. Run the build ------------------------------------------------------
 
 Write-Host ''
-Write-Host '==> Starting pi-gen build in WSL. This takes 30-60 minutes the first time.'
+Write-Host '==> Building the image in WSL (modifying Pi OS Lite). First run downloads ~500 MB and takes several minutes.'
 Write-Host ''
 
 # Run as root so build.sh sees EUID 0; SUDO_USER is set so it can drop
-# back for `go build` / `npm` calls per the script.
-& wsl.exe -d $Distro -u root -e bash -lc "cd '$dst' && SUDO_USER='$linuxUser' bash image/build.sh"
+# back for `go build` / `npm` calls per the script. VERSION is derived
+# from git above and passed through since the build dir has no .git.
+& wsl.exe -d $Distro -u root -e bash -lc "cd '$dst' && SUDO_USER='$linuxUser' VERSION='$imgVersion' bash image/build.sh"
 if ($LASTEXITCODE -ne 0) {
     Write-Host ''
     Write-Host 'Build failed.' -ForegroundColor Red

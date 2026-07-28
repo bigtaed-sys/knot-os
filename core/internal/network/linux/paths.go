@@ -36,6 +36,12 @@ const (
 	IfaceWlan    = "wlan0"
 	IfaceAP      = "ap0"
 	IfaceAPGuest = "ap_guest"
+	// IfaceBrLAN is the bridge that fuses the Wi-Fi AP (wlan0) with any
+	// wired LAN ports into one L2 segment sharing the LAN subnet + DHCP.
+	// Created only in the wifi-router role when the user has assigned at
+	// least one Ethernet port as LAN; otherwise the AP runs on wlan0
+	// directly with no bridge.
+	IfaceBrLAN = "br-lan"
 )
 
 // GuestLANCIDR is the dedicated /24 the guest BSS lives on. Distinct

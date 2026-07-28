@@ -100,6 +100,7 @@
 			{plugins}
 			version={status?.version ?? ''}
 			modemActive={status?.network?.wan?.mode === 'modem'}
+			routerActive={status?.role === 'wifi-router'}
 			bind:open={sidebarOpen}
 		/>
 		<div class="flex-1 flex flex-col min-w-0">

@@ -65,6 +65,46 @@ func validRouter() Config {
 	return c
 }
 
+func TestValidateLANPorts(t *testing.T) {
+	// A distinct set of wired LAN ports (none equal to the WAN) is fine.
+	good := validRouter()
+	good.Network.LANPorts = []string{"eth1", "eth2"}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid lan_ports rejected: %v", err)
+	}
+
+	bad := []struct {
+		name  string
+		ports []string
+		sub   string
+	}{
+		{"is the WAN", []string{"eth0"}, "WAN"},          // eth0 is validRouter's WAN
+		{"duplicate", []string{"eth1", "eth1"}, "duplicate"},
+		{"bad name", []string{"eth 1"}, "not a valid"},
+	}
+	for _, tc := range bad {
+		c := validRouter()
+		c.Network.LANPorts = tc.ports
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.sub) {
+			t.Errorf("%s: got err=%v, want substring %q", tc.name, err, tc.sub)
+		}
+	}
+
+	// lan_ports is router-only: the extender role must reject a non-empty
+	// list rather than silently ignore it.
+	ext := Default()
+	ext.Role = RoleWiFiExtender
+	ext.Auth = Auth{PasswordHash: "$2a$12$placeholder"}
+	ext.Network.Uplink = &WiFiUplink{SSID: "up"}
+	ext.Network.AP = &WiFiAP{SSID: "knot-ap", Band: "2.4"}
+	ext.Network.LAN = &LAN{CIDR: "192.168.42.0/24", DHCP: DHCP{PoolStart: "192.168.42.100", PoolEnd: "192.168.42.200"}}
+	ext.Network.LANPorts = []string{"eth1"}
+	if err := ext.Validate(); err == nil || !strings.Contains(err.Error(), "wifi-router") {
+		t.Errorf("extender with lan_ports should be rejected, got %v", err)
+	}
+}
+
 func TestValidatePortForwards(t *testing.T) {
 	good := validRouter()
 	good.Network.PortForwards = []PortForward{

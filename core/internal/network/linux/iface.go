@@ -144,6 +144,54 @@ func (b *LinuxBackend) linkUp(ctx context.Context, iface string) error {
 	return b.r.runOK(ctx, "ip", "link", "set", iface, "up")
 }
 
+// ensureBridge creates the LAN bridge if it isn't present and brings
+// it up. Idempotent — safe on every Apply. hostapd is what enslaves
+// the Wi-Fi AP into the bridge (via its `bridge=` directive); the
+// wired ports are enslaved by enslaveToBridge below.
+func (b *LinuxBackend) ensureBridge(ctx context.Context, br string) error {
+	if !interfaceExists(br) {
+		if err := b.r.runOK(ctx, "ip", "link", "add", "name", br, "type", "bridge"); err != nil {
+			return fmt.Errorf("ensureBridge: create %s: %w", br, err)
+		}
+	}
+	return b.linkUp(ctx, br)
+}
+
+// removeBridge tears the LAN bridge down. Best-effort — used when a
+// re-apply drops back to a Wi-Fi-only LAN (no wired ports). Any ports
+// still enslaved are released implicitly when the bridge is deleted.
+func (b *LinuxBackend) removeBridge(ctx context.Context, br string) {
+	if !interfaceExists(br) {
+		return
+	}
+	b.linkDown(ctx, br)
+	b.r.runIgnoreError(ctx, "ip", "link", "del", br)
+}
+
+// enslaveToBridge attaches a wired port to the bridge and brings it
+// up. The port must carry no IP of its own (bridging is pure L2), so
+// we flush it first — a stray DHCP lease from a previous role would
+// otherwise shadow the bridge's gateway address.
+func (b *LinuxBackend) enslaveToBridge(ctx context.Context, br, port string) error {
+	if !interfaceExists(port) {
+		return fmt.Errorf("enslaveToBridge: port %q not present", port)
+	}
+	b.addrFlush(ctx, port)
+	if err := b.r.runOK(ctx, "ip", "link", "set", port, "master", br); err != nil {
+		return fmt.Errorf("enslaveToBridge: %s master %s: %w", port, br, err)
+	}
+	return b.linkUp(ctx, port)
+}
+
+// releaseFromBridge detaches a port previously enslaved to a bridge.
+// Best-effort; used when the user removes a port from the LAN set.
+func (b *LinuxBackend) releaseFromBridge(ctx context.Context, port string) {
+	if !interfaceExists(port) {
+		return
+	}
+	b.r.runIgnoreError(ctx, "ip", "link", "set", port, "nomaster")
+}
+
 // linkDown takes an interface down (best-effort).
 func (b *LinuxBackend) linkDown(ctx context.Context, iface string) {
 	b.r.runIgnoreError(ctx, "ip", "link", "set", iface, "down")

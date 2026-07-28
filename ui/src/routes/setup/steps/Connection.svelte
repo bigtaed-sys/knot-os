@@ -7,6 +7,25 @@
 	import { wizard } from '../wizard.svelte';
 
 	const linkedEths = $derived(wizard.cap?.eth.filter((e) => e.link) ?? []);
+	// Cabled ports that could be switched into the LAN: everything
+	// except the one chosen as WAN.
+	const lanCandidates = $derived(linkedEths.filter((e) => e.name !== wizard.wanInterface));
+
+	function toggleLan(name: string, on: boolean) {
+		if (on) {
+			if (!wizard.lanPorts.includes(name)) wizard.lanPorts = [...wizard.lanPorts, name];
+		} else {
+			wizard.lanPorts = wizard.lanPorts.filter((p) => p !== name);
+		}
+	}
+
+	// A port can't be both WAN and LAN: whenever the WAN changes, drop
+	// it from the LAN set.
+	$effect(() => {
+		if (wizard.wanInterface && wizard.lanPorts.includes(wizard.wanInterface)) {
+			wizard.lanPorts = wizard.lanPorts.filter((p) => p !== wizard.wanInterface);
+		}
+	});
 
 	let capTimer: ReturnType<typeof setInterval> | null = null;
 	let modem = $state<ModemStatus>({ present: false, signal_percent: 0 });
@@ -229,6 +248,43 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Wired LAN ports (small switch) — only with >1 cabled port -->
+		{#if lanCandidates.length > 0}
+			<div class="space-y-2">
+				<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+					{$_('setup.conn.lan_ports_label')}
+				</div>
+				<p class="text-xs text-zinc-500 dark:text-zinc-400">{$_('setup.conn.lan_ports_help')}</p>
+				<div class="space-y-2">
+					{#each lanCandidates as e}
+						<label
+							class="
+								flex items-center gap-3 p-3 rounded-md border cursor-pointer
+								{wizard.lanPorts.includes(e.name)
+									? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
+									: 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'}
+							"
+						>
+							<input
+								type="checkbox"
+								checked={wizard.lanPorts.includes(e.name)}
+								onchange={(ev) => toggleLan(e.name, ev.currentTarget.checked)}
+								class="text-brand-600"
+							/>
+							<i class="bi bi-diagram-3 text-brand-500"></i>
+							<div class="flex-1 min-w-0">
+								<div class="font-mono text-xs text-zinc-700 dark:text-zinc-300">{e.name}</div>
+								<div class="text-xs text-zinc-500 dark:text-zinc-400 truncate">{e.model}</div>
+							</div>
+							{#if wizard.lanPorts.includes(e.name)}
+								<span class="badge badge-ok text-[10px]">{$_('setup.conn.lan_port_on')}</span>
+							{/if}
+						</label>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<!-- WAN mode (DHCP / PPPoE) -->
 		<div class="space-y-2">

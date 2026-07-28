@@ -1,15 +1,21 @@
 // Package capability probes the running host for the hardware
-// features that gate KnotOS roles: which USB-Ethernet adapters are
-// attached (so the wifi-router role can pick a WAN), what Pi model
-// is underneath (so we can decide whether a concurrent guest AP on
-// a second radio is feasible), and a friendly label for each
-// adapter so the wizard can tell the user what it actually saw.
+// features that gate KnotOS roles: which Ethernet ports are attached
+// (so the wifi-router role can pick a WAN, and — on boards with more
+// than one — assign the rest as wired LAN), what Pi model is
+// underneath (so we can decide whether a concurrent guest AP on a
+// second radio is feasible), and a friendly label for each port so
+// the wizard can tell the user what it actually saw.
 //
-// The probe is driver-agnostic — anything that lands as a netdev
-// with a USB ancestor counts. r8152, asix, ax88179_178a, cdc_ether
-// all just work without an opt-in list. A small lookup table over
-// USB IDs feeds the human-readable label, but unknown adapters
-// still appear (with a generic "USB Ethernet" name).
+// The probe is driver-agnostic. It reports every physical Ethernet
+// netdev — both USB dongles (r8152, asix, ax88179_178a, cdc_ether …)
+// AND the onboard NIC on boards that have one. Crucially this includes
+// the Pi 4/5 built-in port, which hangs off the SoC's bcmgenet MAC
+// (NOT the USB bus, unlike the Pi 3B/Zero whose "onboard" Ethernet is
+// really a USB device). Wireless (wlan*, anything with a phy80211) and
+// cellular (wwan*) netdevs are excluded — those are handled elsewhere.
+// A small lookup table over USB IDs feeds the human-readable label;
+// unknown/onboard ports still appear with a generic name. The USB
+// field distinguishes a hot-pluggable dongle from a fixed onboard port.
 //
 // Everything sysfs-related goes through SysClassNet/ModelFile in
 // Probe so unit tests can point at a fake tree on any OS.
@@ -52,9 +58,10 @@ type EthAdapter struct {
 	// i.e. an Ethernet cable is plugged in and the link is up.
 	// Read at probe time, not cached; re-Probe to get a fresh value.
 	Link bool `json:"link"`
-	// USB reports whether this is a USB-attached adapter (vs
-	// onboard PCIe / SoC Ethernet). The setup wizard cares because
-	// USB hot-plug is the user-friendly path.
+	// USB reports whether this is a USB-attached adapter (vs an
+	// onboard SoC/PCIe NIC). The wizard uses it to label the port
+	// ("USB Ethernet" vs "Onboard Ethernet") and because USB hot-plug
+	// is the user-friendly WAN path.
 	USB bool `json:"usb"`
 	// USBVendor is the lower-case 4-hex-digit vendor ID, e.g. "0bda".
 	USBVendor string `json:"usb_vendor,omitempty"`
@@ -103,7 +110,7 @@ func (p Probe) Run() (Report, error) {
 		r.Pi = classifyPi(model)
 	}
 
-	eth, err := scanUSBEth(p.SysClassNet)
+	eth, err := scanEth(p.SysClassNet)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return r, fmt.Errorf("capability: %w", err)
 	}
@@ -152,10 +159,10 @@ func classifyPi(model string) PiModel {
 	}
 }
 
-// scanUSBEth walks /sys/class/net/* and returns adapters whose
-// device path includes a USB ancestor. Output is sorted by interface
-// name for stable test assertions.
-func scanUSBEth(sysClassNet string) ([]EthAdapter, error) {
+// scanEth walks /sys/class/net/* and returns every physical Ethernet
+// port — USB dongles and the onboard NIC alike. Output is sorted by
+// interface name for stable test assertions.
+func scanEth(sysClassNet string) ([]EthAdapter, error) {
 	entries, err := os.ReadDir(sysClassNet)
 	if err != nil {
 		return nil, err
@@ -164,8 +171,12 @@ func scanUSBEth(sysClassNet string) ([]EthAdapter, error) {
 	var out []EthAdapter
 	for _, e := range entries {
 		ifname := e.Name()
-		// Skip loopback and the wlan family up front.
-		if ifname == "lo" || strings.HasPrefix(ifname, "wlan") {
+		// Skip loopback, the wlan family, and cellular data netdevs
+		// up front (a modem's wwan0 is a WAN handled by ModemManager,
+		// never a wired LAN/WAN port the user assigns here).
+		if ifname == "lo" ||
+			strings.HasPrefix(ifname, "wlan") ||
+			strings.HasPrefix(ifname, "wwan") {
 			continue
 		}
 		ad, ok := readAdapter(sysClassNet, ifname)
@@ -179,24 +190,38 @@ func scanUSBEth(sysClassNet string) ([]EthAdapter, error) {
 }
 
 // readAdapter inspects /sys/class/net/<ifname> and returns a populated
-// EthAdapter when it is a USB-attached Ethernet interface; returns
-// (_, false) for everything else (PCIe NICs, virtual interfaces).
+// EthAdapter when it is a physical Ethernet port; returns (_, false)
+// for virtual interfaces (bridge, tun, veth) and wireless netdevs.
 //
-// USB recognition uses two independent signals so a quirk in one
-// doesn't drop the adapter:
+// Recognition:
+//   - It must have a "device" symlink. Virtual netdevs (br*, tun*,
+//     veth*, dummy*) don't — only devices sitting on a real bus (USB,
+//     PCIe, or the SoC platform bus) do. This is the primary filter.
+//   - It must not be wireless. A Wi-Fi netdev carries a phy80211/
+//     wireless subdir; those are the AP/STA radio, never a wired port.
 //
+// USB vs onboard is then a label-only distinction (the USB field),
+// detected via two independent signals so a quirk in one doesn't
+// mislabel the port:
 //   - The device symlink target contains "usb" anywhere in the path
-//     (covers both "/sys/devices/.../soc/3f980000.usb/usb1/..." on
-//     a Zero 2W and "/sys/devices/pci.../usb1/..." on a Pi 5).
-//   - The uevent file contains a PRODUCT= line, which is the
-//     canonical USB-device fingerprint (vendor/product/version).
+//     (covers "/sys/devices/.../soc/3f980000.usb/usb1/..." on a Zero
+//     2W and "/sys/devices/pci.../usb1/..." on a Pi 5), or
+//   - The uevent file has a PRODUCT= line — the canonical USB-device
+//     fingerprint (vendor/product/version).
 //
-// Either condition is enough; both are robust on Pi OS Lite.
+// Neither present → onboard (e.g. the Pi 4/5 bcmgenet MAC on the
+// platform bus, whose path has no "usb" and whose uevent has no
+// PRODUCT=).
 func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 	devLink := filepath.Join(sysClassNet, ifname, "device")
 	resolved, err := os.Readlink(devLink)
 	if err != nil {
 		// No device symlink → virtual iface (bridge, tun, veth, …).
+		return EthAdapter{}, false
+	}
+	// Wireless netdevs expose a phy80211 symlink and/or a wireless
+	// dir. Exclude them: those are the radio, not a wired port.
+	if isWireless(sysClassNet, ifname) {
 		return EthAdapter{}, false
 	}
 
@@ -205,9 +230,7 @@ func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 
 	hasUSBPath := strings.Contains(resolved, "usb")
 	hasUSBID := vendor != "" && product != ""
-	if !hasUSBPath && !hasUSBID {
-		return EthAdapter{}, false
-	}
+	usb := hasUSBPath || hasUSBID
 
 	// Link sense: prefer /sys/class/net/<iface>/carrier — reads "1"
 	// when an Ethernet cable is plugged in AND the interface is
@@ -240,11 +263,27 @@ func readAdapter(sysClassNet, ifname string) (EthAdapter, bool) {
 		Interface:  ifname,
 		Driver:     driver,
 		Link:       link,
-		USB:        hasUSBPath || hasUSBID,
+		USB:        usb,
 		USBVendor:  vendor,
 		USBProduct: product,
-		Model:      describeAdapter(vendor, product, driver),
+		Model:      describeAdapter(vendor, product, driver, usb),
 	}, true
+}
+
+// isWireless reports whether /sys/class/net/<ifname> is a Wi-Fi
+// netdev. Wireless interfaces publish a phy80211 symlink (and a
+// wireless/ dir); wired Ethernet never does. Used to keep the radio
+// out of the wired-port list even on kernels/boards where a Wi-Fi
+// netdev isn't named "wlan*".
+func isWireless(sysClassNet, ifname string) bool {
+	base := filepath.Join(sysClassNet, ifname)
+	if _, err := os.Lstat(filepath.Join(base, "phy80211")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(base, "wireless")); err == nil {
+		return true
+	}
+	return false
 }
 
 // parseUevent extracts driver, USB vendor, and product from a
