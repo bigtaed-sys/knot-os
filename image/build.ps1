@@ -315,5 +315,5 @@ Get-ChildItem $winDeploy -Filter '*.img.xz' |
     }
 
 Write-Host ''
-Write-Host 'Flash with Raspberry Pi Imager: Choose Device -> Pi Zero 2 W,'
+Write-Host 'Flash with Raspberry Pi Imager: Choose Device -> your Pi (Zero 2 W / 3 / 4 / 5),'
 Write-Host '                                Choose OS -> Use custom -> select the .img.xz.'

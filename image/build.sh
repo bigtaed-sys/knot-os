@@ -15,7 +15,8 @@
 #   - Run as root (we do losetup, mount, chroot).
 #
 # Output:
-#   image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz
+#   image/deploy/<timestamp>-KnotOS-pi-arm64-<version>.img.xz
+#   (generic arm64 — boots on any arm64 Pi: Zero 2W, 3, 4, 5)
 
 set -euo pipefail
 
@@ -653,7 +654,11 @@ echo "    .img size: $((img_bytes / 1024 / 1024)) MiB ($img_bytes bytes), part2 
 rm -f "$DEPLOY_DIR"/*.img.xz
 
 TS="$(date +%Y%m%d-%H%M)"
-OUT="$DEPLOY_DIR/${TS}-KnotOS-zero2w-${VERSION}.img.xz"
+# Generic arm64 image — the base is Raspberry Pi OS Lite arm64, which
+# boots on every arm64 Pi (Zero 2W, 3, 4, 5). The filename is NOT
+# model-specific (it used to say "zero2w" from when that was the only
+# target); nothing parses it — the copy-back step globs *.img.xz.
+OUT="$DEPLOY_DIR/${TS}-KnotOS-pi-arm64-${VERSION}.img.xz"
 echo "    compressing -> $OUT (this takes a few minutes)"
 xz -T0 -c "$WORK_IMG" > "$OUT"
 
@@ -665,5 +670,5 @@ echo "==> Done."
 echo "    Image: $OUT"
 echo "    Size:  $(stat -c '%s' "$OUT") bytes"
 echo
-echo "Flash with Raspberry Pi Imager: Choose Device -> Pi Zero 2 W,"
+echo "Flash with Raspberry Pi Imager: Choose Device -> your Pi (Zero 2 W / 3 / 4 / 5),"
 echo "                                Choose OS -> Use custom -> select the .img.xz."

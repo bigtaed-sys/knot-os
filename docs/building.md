@@ -42,9 +42,11 @@ go test ./core/...
 cd ui && npm run check
 ```
 
-## Building a flashable image (Raspberry Pi Zero 2W)
+## Building a flashable image (Raspberry Pi, arm64)
 
-Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
+Produces `image/deploy/<timestamp>-KnotOS-pi-arm64-<version>.img.xz`. The
+base is Raspberry Pi OS Lite arm64, so the same image boots on any arm64
+Pi — Zero 2W, 3, 4, and 5.
 
 ### Requirements
 
@@ -68,7 +70,7 @@ Produces `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
 sudo bash image/build.sh
 ```
 
-Takes about 5–10 minutes on a typical laptop (~2 min download for the Pi OS Lite base on first run, then chroot-install of our extras + image compression). The output is `image/deploy/<timestamp>-KnotOS-zero2w-<version>.img.xz`.
+Takes about 5–10 minutes on a typical laptop (~2 min download for the Pi OS Lite base on first run, then chroot-install of our extras + image compression). The output is `image/deploy/<timestamp>-KnotOS-pi-arm64-<version>.img.xz`.
 
 The script downloads the latest official Raspberry Pi OS Lite arm64 image, mounts it, installs `hostapd`, `dnsmasq`, `nftables`, `iw`, `isc-dhcp-client`, and `avahi-daemon` into the chroot, drops in `knotd` + `knotctl` + the systemd unit + the seed config + bundled plugins, masks the stock services that race for `wlan0`, and repackages. The base image is cached under `image/cache/` so subsequent runs skip the download.
 
@@ -98,7 +100,7 @@ Useful flags:
 Use **Raspberry Pi Imager** (recommended) or any tool that can write `.img.xz` to an SD card.
 
 In Raspberry Pi Imager:
-1. *Choose Device* → Raspberry Pi Zero 2 W
+1. *Choose Device* → your Raspberry Pi (Zero 2 W / 3 / 4 / 5)
 2. *Choose OS* → *Use custom* → select the `.img.xz`
 3. *Choose Storage* → your SD card
 4. *Write*
