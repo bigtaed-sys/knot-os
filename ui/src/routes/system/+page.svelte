@@ -780,7 +780,8 @@
 					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 						<input
 							class="input font-mono"
-							type="number"
+							type="text"
+							inputmode="numeric"
 							bind:value={appIDInput}
 							placeholder={notifyState.app_configured ? String(notifyState.app_id) : 'app_id'}
 						/>

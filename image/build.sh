@@ -22,6 +22,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Default the version to the current git tag (e.g. v2026.07.9 → 2026.07.9)
+# so a locally-built image reports the real version, not a stale constant.
+# Override by exporting VERSION before running.
+VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null | sed 's/^v//')}"
 VERSION="${VERSION:-2026.05.1-dev}"
 LITE_URL="${LITE_URL:-https://downloads.raspberrypi.com/raspios_lite_arm64_latest}"
 QEMU_BIN="${QEMU_BIN:-/usr/bin/qemu-aarch64-static}"
