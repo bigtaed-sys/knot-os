@@ -24,17 +24,61 @@ export interface CapabilityReport {
 }
 
 // PortView is one Ethernet port plus its role under the active config
-// ("wan" | "lan" | "unused"), as returned by GET /network/ports.
+// ("wan" | "lan" | "unused"), as returned by GET /network.
 export interface PortView extends EthAdapter {
 	role: 'wan' | 'lan' | 'unused';
 }
 
-export interface NetworkPortsResponse {
-	pi_model_string?: string;
+// --- /network settings (post-setup network editor) -------------------
+
+export interface ModemSettings {
+	apn?: string;
+	pin?: string;
+	username?: string;
+	sim_slot?: number;
+	data_limit_mb?: number;
+	cycle_reset_day?: number;
+}
+
+export interface WANConfig {
+	mode?: 'dhcp' | 'modem';
+	interface?: string;
+	modem?: ModemSettings;
+}
+
+export interface APConfig {
+	ssid?: string;
+	psk?: string;
+	band?: '2.4' | '5';
+	channel?: number;
+}
+
+export interface UplinkConfig {
+	ssid?: string;
+	psk?: string;
+}
+
+export interface LANConfig {
+	cidr?: string;
+	dhcp?: { pool_start?: string; pool_end?: string };
+}
+
+// NetworkConfig is the subset of config.Network the settings page edits
+// (the daemon carries more — dns/zapret/etc. — untouched here).
+export interface NetworkConfig {
+	wan?: WANConfig;
+	uplink?: UplinkConfig;
+	ap?: APConfig;
+	lan?: LANConfig;
+	lan_ports?: string[];
+}
+
+export interface NetworkResponse {
+	role: 'wifi-router' | 'wifi-extender' | 'setup';
+	network: NetworkConfig;
 	ports: PortView[];
-	wan_interface: string;
-	lan_ports: string[];
-	router_mode: boolean;
+	modem: ModemStatus;
+	pi_model_string?: string;
 }
 
 export interface UplinkStatus {
