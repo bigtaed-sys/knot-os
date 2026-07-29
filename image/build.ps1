@@ -108,13 +108,27 @@ Write-Host "Using WSL distro: $Distro"
 
 # Derive the image version from git on the Windows side. The build dir
 # synced into WSL excludes .git/, so build.sh can't read the tag itself -
-# we compute it here and pass it through as $VERSION. Strip the leading
-# 'v' (v2026.07.9 -> 2026.07.9). Falls back to a dev marker outside a
-# git checkout.
+# we compute it here and pass it through as $VERSION.
+#
+# Match what a real (tagged) release reports, and never invent a version
+# that looks like a patch:
+#   * HEAD is exactly on a tag  -> that tag, e.g. "2026.07.10". Identical
+#                                  to what release.yml stamps.
+#   * HEAD is past the last tag -> "<last-tag>-dev", e.g. "2026.07.9-dev".
+#     Deliberately NOT `git describe`'s "2026.07.9-6-g4b0be00": the "-6"
+#     commit count collides visually with the "-N" patch scheme, and the
+#     "-g<hash>" is noise. "-dev" reads unambiguously as "unreleased,
+#     built from local changes after 2026.07.9".
+# Override any of this by exporting VERSION before running build.ps1.
 $imgVersion = ''
 try {
-    $desc = (& git -C $repoRoot describe --tags --always 2>$null | Out-String).Trim()
-    if ($desc) { $imgVersion = ($desc -replace '^v', '') }
+    $exact = (& git -C $repoRoot describe --tags --exact-match HEAD 2>$null | Out-String).Trim()
+    if ($exact) {
+        $imgVersion = ($exact -replace '^v', '')
+    } else {
+        $nearest = (& git -C $repoRoot describe --tags --abbrev=0 2>$null | Out-String).Trim()
+        if ($nearest) { $imgVersion = ($nearest -replace '^v', '') + '-dev' }
+    }
 } catch { }
 if (-not $imgVersion) { $imgVersion = '0.0.0-dev' }
 Write-Host "Image version: $imgVersion"
