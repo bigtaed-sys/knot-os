@@ -120,16 +120,26 @@ Write-Host "Using WSL distro: $Distro"
 #     "-g<hash>" is noise. "-dev" reads unambiguously as "unreleased,
 #     built from local changes after 2026.07.9".
 # Override any of this by exporting VERSION before running build.ps1.
+#
+# PS 5.1 note: don't use `git describe --exact-match` + `2>$null` here.
+# When HEAD isn't on a tag that command errors, and under this script's
+# `$ErrorActionPreference='Stop'` the `2>$null` redirect turns git's
+# stderr into a terminating error — swallowing the whole block and
+# leaving 0.0.0-dev. `git tag --points-at HEAD` instead returns the
+# tag(s) on HEAD with a clean exit 0 (empty when none), no stderr.
 $imgVersion = ''
-try {
-    $exact = (& git -C $repoRoot describe --tags --exact-match HEAD 2>$null | Out-String).Trim()
-    if ($exact) {
-        $imgVersion = ($exact -replace '^v', '')
-    } else {
-        $nearest = (& git -C $repoRoot describe --tags --abbrev=0 2>$null | Out-String).Trim()
-        if ($nearest) { $imgVersion = ($nearest -replace '^v', '') + '-dev' }
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$onTag = (& git -C $repoRoot tag --points-at HEAD | Select-Object -First 1)
+if ($onTag) {
+    $imgVersion = ($onTag.ToString().Trim() -replace '^v', '')
+} else {
+    $nearest = (& git -C $repoRoot describe --tags --abbrev=0)
+    if ($LASTEXITCODE -eq 0 -and $nearest) {
+        $imgVersion = ($nearest.ToString().Trim() -replace '^v', '') + '-dev'
     }
-} catch { }
+}
+$ErrorActionPreference = $prevEAP
 if (-not $imgVersion) { $imgVersion = '0.0.0-dev' }
 Write-Host "Image version: $imgVersion"
 
