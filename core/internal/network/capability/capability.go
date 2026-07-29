@@ -82,6 +82,12 @@ type Report struct {
 	// RouterCapable is shorthand for "is len(Eth) > 0?". The wizard
 	// gates the role-choice card on this.
 	RouterCapable bool `json:"router_capable"`
+	// FiveGHzCapable reports whether the board's built-in Wi-Fi can run
+	// a 5 GHz AP. Conservative: only Pi 4/5 (their brcmfmac radios do
+	// dual-band). Zero 2W and Pi 3B are 2.4 GHz only, so the UI hides
+	// the band choice there. Note this is one-band-at-a-time — a single
+	// radio can't broadcast 2.4 and 5 GHz at once.
+	FiveGHzCapable bool `json:"five_ghz_capable"`
 }
 
 // Probe holds the file-system roots used during a Run. Construct
@@ -122,6 +128,10 @@ func (p Probe) Run() (Report, error) {
 	// concurrent APs. Zero 2W's BCM43436 cannot. Conservative:
 	// only Pi 4/5 light up the guest AP path in v0.3.
 	r.GuestAPCapable = r.Pi == Pi4 || r.Pi == Pi5
+
+	// 5 GHz AP: Pi 4/5 only (dual-band brcmfmac). Zero 2W / Pi 3B are
+	// 2.4 GHz-only radios.
+	r.FiveGHzCapable = r.Pi == Pi4 || r.Pi == Pi5
 
 	return r, nil
 }

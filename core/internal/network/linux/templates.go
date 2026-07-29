@@ -64,9 +64,6 @@ type HostapdGuestBSS struct {
 // the given parameters. The output is a deterministic string with no
 // trailing whitespace, suitable for direct comparison in tests.
 func BuildHostapdConf(p HostapdParams) string {
-	if p.Channel == 0 {
-		p.Channel = 6
-	}
 	if p.Country == "" {
 		p.Country = "00"
 	}
@@ -84,10 +81,7 @@ func BuildHostapdConf(p HostapdParams) string {
 	fmt.Fprintf(&b, "country_code=%s\n", p.Country)
 	fmt.Fprintln(&b, "ieee80211d=1")
 
-	// Only 2.4 GHz on Zero 2W ap0 in v0.1.
-	fmt.Fprintln(&b, "hw_mode=g")
-	fmt.Fprintf(&b, "channel=%d\n", p.Channel)
-	fmt.Fprintln(&b, "ieee80211n=1")
+	appendRadio(&b, p.Band, p.Channel)
 
 	fmt.Fprintln(&b, "auth_algs=1")
 	fmt.Fprintln(&b, "wmm_enabled=1")
@@ -104,6 +98,48 @@ func BuildHostapdConf(p HostapdParams) string {
 	fmt.Fprintf(&b, "wpa_passphrase=%s\n", p.PSK)
 	appendGuestBSS(&b, p.Guest)
 	return b.String()
+}
+
+// appendRadio writes the band-specific PHY block: hw_mode, channel,
+// and HT/VHT capabilities.
+//
+//   - "2.4" (default): hw_mode=g, 802.11n (HT20). Channel 0 → 6.
+//   - "5":             hw_mode=a, 802.11ac (VHT80). Channel 0 → 36.
+//     The AP band on the Pi's built-in radio is one-at-a-time — a single
+//     brcmfmac radio can't run 2.4 and 5 GHz simultaneously (that needs a
+//     second adapter). 5 GHz REQUIRES a real regdomain (country_code is
+//     emitted by the caller); we constrain the UI to the non-DFS UNII-1
+//     block (36/40/44/48) so there's no radar-scan wait and 80 MHz VHT
+//     is centred on segment-0 index 42. brcmfmac AP mode won't do DFS
+//     channels, so those are deliberately not offered.
+func appendRadio(b *strings.Builder, band string, channel int) {
+	if band == "5" {
+		ch := channel
+		if ch == 0 {
+			ch = 36
+		}
+		fmt.Fprintln(b, "hw_mode=a")
+		fmt.Fprintf(b, "channel=%d\n", ch)
+		fmt.Fprintln(b, "ieee80211n=1")
+		fmt.Fprintln(b, "ieee80211ac=1")
+		fmt.Fprintln(b, "ht_capab=[HT40+][SHORT-GI-20][SHORT-GI-40]")
+		// 80 MHz VHT is only laid out for the 36–48 block (its centre
+		// frequency index is 42). Any other channel falls back to the
+		// safe 20/40 MHz HT default with no vht_oper_* lines.
+		if ch >= 36 && ch <= 48 {
+			fmt.Fprintln(b, "vht_oper_chwidth=1")
+			fmt.Fprintln(b, "vht_oper_centr_freq_seg0_idx=42")
+		}
+		return
+	}
+	// 2.4 GHz (default).
+	ch := channel
+	if ch == 0 {
+		ch = 6
+	}
+	fmt.Fprintln(b, "hw_mode=g")
+	fmt.Fprintf(b, "channel=%d\n", ch)
+	fmt.Fprintln(b, "ieee80211n=1")
 }
 
 // appendGuestBSS writes the second BSS section that piggy-backs

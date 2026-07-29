@@ -75,11 +75,12 @@ func (s *Server) handleGetNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"role":            cfg.Role,
-		"network":         cfg.Network,
-		"ports":           ports,
-		"modem":           modem,
-		"pi_model_string": rep.PiModelString,
+		"role":             cfg.Role,
+		"network":          cfg.Network,
+		"ports":            ports,
+		"modem":            modem,
+		"pi_model_string":  rep.PiModelString,
+		"five_ghz_capable": rep.FiveGHzCapable,
 	})
 }
 

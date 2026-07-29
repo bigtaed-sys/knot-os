@@ -58,6 +58,34 @@ func TestHostapdDefaultsChannel(t *testing.T) {
 	}
 }
 
+func TestHostapd5GHz(t *testing.T) {
+	// Band "5" must switch the radio to 802.11ac on a UNII-1 channel
+	// with 80 MHz VHT — not the 2.4 GHz hw_mode=g default.
+	out := BuildHostapdConf(HostapdParams{
+		Interface: "wlan0", SSID: "x", Country: "DE", Band: "5", PSK: "secret12",
+	})
+	mustContain(t, out,
+		"hw_mode=a",
+		"channel=36",
+		"ieee80211ac=1",
+		"vht_oper_centr_freq_seg0_idx=42",
+	)
+	if strings.Contains(out, "hw_mode=g") {
+		t.Errorf("5 GHz must not emit hw_mode=g:\n%s", out)
+	}
+
+	// Explicit 5 GHz channel is honoured.
+	out44 := BuildHostapdConf(HostapdParams{Interface: "wlan0", SSID: "x", Country: "DE", Band: "5", Channel: 44})
+	mustContain(t, out44, "hw_mode=a", "channel=44")
+
+	// 2.4 GHz stays the default and never emits hw_mode=a.
+	out24 := BuildHostapdConf(HostapdParams{Interface: "wlan0", SSID: "x", Country: "DE", Band: "2.4"})
+	mustContain(t, out24, "hw_mode=g", "channel=6")
+	if strings.Contains(out24, "hw_mode=a") || strings.Contains(out24, "ieee80211ac") {
+		t.Errorf("2.4 GHz must not emit 5 GHz directives:\n%s", out24)
+	}
+}
+
 func TestHostapdBridge(t *testing.T) {
 	// With Bridge set, hostapd must be told to enslave its AP interface
 	// into the LAN bridge; without it, no bridge= line appears.

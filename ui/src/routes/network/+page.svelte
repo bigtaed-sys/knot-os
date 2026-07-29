@@ -12,6 +12,7 @@
 	let savedFlash = $state(false);
 	let saving = $state(false);
 	let piModel = $state('');
+	let fiveGhzCapable = $state(false);
 	let ports = $state<PortView[]>([]);
 	let modem = $state<ModemStatus>({ present: false, signal_percent: 0 });
 
@@ -44,6 +45,35 @@
 	const cabledPorts = $derived(ports.filter((p) => p.link));
 	const lanCandidates = $derived(cabledPorts.filter((p) => p.name !== wanInterface));
 
+	// Channel choices depend on the band. 5 GHz is restricted to the
+	// non-DFS UNII-1 block (36/40/44/48) — the only channels the Pi's
+	// brcmfmac AP drives without a radar-scan wait.
+	const channelOptions = $derived(
+		apBand === '5'
+			? [
+					{ v: 0, l: $_('network.ap_channel_auto') },
+					{ v: 36, l: '36' },
+					{ v: 40, l: '40' },
+					{ v: 44, l: '44' },
+					{ v: 48, l: '48' }
+				]
+			: [
+					{ v: 0, l: $_('network.ap_channel_auto') },
+					{ v: 1, l: '1' },
+					{ v: 6, l: '6' },
+					{ v: 11, l: '11' }
+				]
+	);
+
+	// Never leave the band on 5 GHz for a board that can't do it, nor a
+	// channel that isn't valid for the current band.
+	$effect(() => {
+		if (!fiveGhzCapable && apBand === '5') apBand = '2.4';
+	});
+	$effect(() => {
+		if (!channelOptions.some((o) => o.v === apChannel)) apChannel = 0;
+	});
+
 	async function load() {
 		loading = true;
 		try {
@@ -51,6 +81,7 @@
 			ports = r.ports ?? [];
 			modem = r.modem ?? { present: false, signal_percent: 0 };
 			piModel = r.pi_model_string ?? '';
+			fiveGhzCapable = r.five_ghz_capable ?? false;
 			if (r.role === 'wifi-extender') role = 'wifi-extender';
 			else role = 'wifi-router';
 			const n = r.network ?? {};
@@ -351,21 +382,28 @@
 					<input id="net-ap-psk" class="input mt-1 font-mono" type="text" bind:value={apPSK} minlength={8} maxlength={63} />
 					<p class="text-xs text-zinc-500 mt-1">{$_('network.ap_psk_help')}</p>
 				</div>
-				<div>
-					<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">{$_('network.ap_band')}</div>
-					<div class="flex gap-2 mt-1.5">
-						{#each ['2.4', '5'] as b}
-							<button type="button" onclick={() => (apBand = b as '2.4' | '5')}
-								class="px-4 py-1.5 rounded-md border text-sm {apBand === b ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'border-zinc-200 dark:border-zinc-700'}">
-								{b} GHz
-							</button>
-						{/each}
+				{#if fiveGhzCapable}
+					<div>
+						<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">{$_('network.ap_band')}</div>
+						<div class="flex gap-2 mt-1.5">
+							{#each ['2.4', '5'] as b}
+								<button type="button" onclick={() => (apBand = b as '2.4' | '5')}
+									class="px-4 py-1.5 rounded-md border text-sm {apBand === b ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'border-zinc-200 dark:border-zinc-700'}">
+									{b} GHz
+								</button>
+							{/each}
+						</div>
+						<p class="text-xs text-zinc-500 mt-1">{$_('network.band_help')}</p>
 					</div>
-				</div>
+				{:else}
+					<div class="text-xs text-zinc-500 dark:text-zinc-400">
+						<i class="bi bi-info-circle mr-1"></i>{$_('network.band_24_only')}
+					</div>
+				{/if}
 				<div>
 					<div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">{$_('network.ap_channel')}</div>
 					<div class="flex gap-2 mt-1.5">
-						{#each [{ v: 0, l: $_('network.ap_channel_auto') }, { v: 1, l: '1' }, { v: 6, l: '6' }, { v: 11, l: '11' }] as opt}
+						{#each channelOptions as opt}
 							<button type="button" onclick={() => (apChannel = opt.v)}
 								class="px-3 py-1.5 rounded-md border text-xs flex-1 {apChannel === opt.v ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'border-zinc-200 dark:border-zinc-700'}">
 								{opt.l}

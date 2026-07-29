@@ -21,6 +21,7 @@ export interface CapabilityReport {
 	eth: EthAdapter[];
 	guest_ap_capable: boolean;
 	router_capable: boolean;
+	five_ghz_capable?: boolean;
 }
 
 // PortView is one Ethernet port plus its role under the active config
@@ -79,6 +80,7 @@ export interface NetworkResponse {
 	ports: PortView[];
 	modem: ModemStatus;
 	pi_model_string?: string;
+	five_ghz_capable?: boolean;
 }
 
 export interface UplinkStatus {
