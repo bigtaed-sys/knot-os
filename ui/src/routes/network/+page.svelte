@@ -42,8 +42,13 @@
 	let networks = $state<ScannedNetwork[]>([]);
 	let scanning = $state(false);
 
+	// WAN needs a live cable (it's the internet feed), so its picker only
+	// lists cabled ports. A LAN port doesn't — you assign it, THEN plug a
+	// device in — so LAN candidates are every port that isn't the WAN,
+	// cabled or not. (On a modem WAN, wanInterface is "" and the onboard
+	// port is free to become LAN.)
 	const cabledPorts = $derived(ports.filter((p) => p.link));
-	const lanCandidates = $derived(cabledPorts.filter((p) => p.name !== wanInterface));
+	const lanCandidates = $derived(ports.filter((p) => p.name !== wanInterface));
 
 	// Channel choices depend on the band. 5 GHz is restricted to the
 	// non-DFS UNII-1 block (36/40/44/48) — the only channels the Pi's
@@ -422,11 +427,12 @@
 					<label class="flex items-center gap-3 p-3 rounded-md border cursor-pointer
 						{lanPorts.includes(p.name) ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10' : 'border-zinc-200 dark:border-zinc-700'}">
 						<input type="checkbox" checked={lanPorts.includes(p.name)} onchange={(e) => toggleLan(p.name, e.currentTarget.checked)} class="text-brand-600" />
-						<i class="bi bi-diagram-3 text-brand-500"></i>
+						<i class="bi bi-diagram-3 {p.link ? 'text-emerald-500' : 'text-zinc-400'}"></i>
 						<div class="flex-1 min-w-0">
 							<div class="font-mono text-xs text-zinc-700 dark:text-zinc-300">{p.name}</div>
 							<div class="text-xs text-zinc-500 truncate">{p.model}</div>
 						</div>
+						<span class="text-[10px] text-zinc-400">{p.link ? $_('network.link_in') : $_('network.link_out')}</span>
 						{#if lanPorts.includes(p.name)}<span class="badge badge-ok text-[10px]">LAN</span>{/if}
 					</label>
 				{/each}

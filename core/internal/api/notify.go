@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -57,9 +58,20 @@ type notifyStateJSON struct {
 	AppConfigured bool  `json:"app_configured"`
 	AppID         int32 `json:"app_id,omitempty"`
 	ProxyEnabled  bool  `json:"proxy_enabled"`
+	// Warning is a soft, non-fatal note — e.g. the token was saved but the
+	// bot couldn't reach Telegram (blocked api.telegram.org over HTTP).
+	// The setting still took effect; the UI shows this in yellow, not red.
+	Warning string `json:"warning,omitempty"`
 }
 
 func (s *Server) handleNotifyGet(w http.ResponseWriter, _ *http.Request) {
+	s.writeNotifyState(w, "")
+}
+
+// writeNotifyState renders the current bot state (200) with an optional
+// soft warning. Used by the save handlers so a bot that saved fine but
+// couldn't start doesn't hard-fail the request.
+func (s *Server) writeNotifyState(w http.ResponseWriter, warning string) {
 	st := s.notify.Snapshot()
 	cfg := s.Snapshot()
 	writeJSON(w, http.StatusOK, notifyStateJSON{
@@ -70,7 +82,23 @@ func (s *Server) handleNotifyGet(w http.ResponseWriter, _ *http.Request) {
 		AppConfigured: st.AppID > 0 && st.AppHash != "",
 		AppID:         st.AppID,
 		ProxyEnabled:  cfg.Network.TGProxy != nil && cfg.Network.TGProxy.Enabled,
+		Warning:       warning,
 	})
+}
+
+// botUnreachableHint recognises the "can't reach api.telegram.org"
+// failure (the common blocked-region case) and appends actionable
+// advice: the bot needs the MTProto transport + the local proxy.
+func botUnreachableHint(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "api.telegram.org") || strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "timeout") || strings.Contains(msg, "no such host") {
+		return "Сохранено, но бот не смог подключиться к Telegram по HTTP " +
+			"(api.telegram.org недоступен). Если Telegram заблокирован — включите локальный " +
+			"Telegram-прокси на странице «Обход блокировок» и задайте app_id/app_hash ниже: " +
+			"тогда бот пойдёт через MTProto и заработает. (" + msg + ")"
+	}
+	return "Сохранено, но бот не запустился: " + msg
 }
 
 // handleNotifyPutApp sets/clears the MTProto app credentials and restarts
@@ -92,7 +120,9 @@ func (s *Server) handleNotifyPutApp(w http.ResponseWriter, r *http.Request) {
 		// Refresh the proxy route from the current config before restart.
 		s.notifyBot.SetMTProxy(s.botMTProxyURL(), "/var/lib/knot/notify-mtproto.session")
 		if err := s.notifyBot.Restart(r.Context()); err != nil {
-			writeError(w, http.StatusBadRequest, "bot_start_failed", err.Error())
+			// Credentials saved; a start failure is a soft warning (the
+			// bot may still need the proxy enabled, or the token set).
+			s.writeNotifyState(w, botUnreachableHint(err))
 			return
 		}
 	}
@@ -124,10 +154,14 @@ func (s *Server) handleNotifyPutToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Restart the bot loop so it picks up the new token + does
-	// /getMe to populate the username.
+	// /getMe to populate the username. A start failure is NOT fatal to
+	// the save: the token is stored regardless, and the most common
+	// failure in blocked regions is getMe timing out on api.telegram.org
+	// — which the user fixes by enabling the MTProto transport + proxy.
+	// Surface that as a soft warning (200), not a hard 400.
 	if s.notifyBot != nil {
 		if err := s.notifyBot.Restart(r.Context()); err != nil {
-			writeError(w, http.StatusBadRequest, "bot_start_failed", err.Error())
+			s.writeNotifyState(w, botUnreachableHint(err))
 			return
 		}
 	}

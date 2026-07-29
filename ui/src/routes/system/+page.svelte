@@ -805,6 +805,13 @@
 				</div>
 			{/if}
 
+			{#if notifyState?.warning}
+				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm">
+					<i class="bi bi-exclamation-triangle mt-0.5 shrink-0"></i>
+					<span>{notifyState.warning}</span>
+				</div>
+			{/if}
+
 			{#if notifyError}
 				<div class="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 text-sm">
 					<i class="bi bi-exclamation-circle mt-0.5 shrink-0"></i>

@@ -65,6 +65,8 @@
 		"pool_end": "DHCP pool end",
 		"usb": "USB",
 		"onboard": "Onboard",
+		"link_in": "cable",
+		"link_out": "no cable",
 		"applying": "Applying…",
 		"save": "Save & apply",
 		"saved": "Saved",

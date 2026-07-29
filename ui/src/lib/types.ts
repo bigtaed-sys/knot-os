@@ -343,6 +343,7 @@ export interface NotifyState {
 	app_configured?: boolean;
 	app_id?: number;
 	proxy_enabled?: boolean;
+	warning?: string;
 }
 
 export interface NotifyPIN {
